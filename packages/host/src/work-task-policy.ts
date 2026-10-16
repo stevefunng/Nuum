@@ -26,12 +26,12 @@ export const WORK_TASK_TRANSITIONS: Readonly<Record<WorkTaskState, readonly Tran
     { to: "cancelled", roles: ["user", "coordinator"] }
   ],
   blocked: [
-    { to: "in_progress", roles: ["user", "coordinator", "worker"] },
-    { to: "ready", roles: ["user", "coordinator"] },
+    { to: "in_progress", roles: ["user"] },
+    { to: "ready", roles: ["user"] },
     { to: "cancelled", roles: ["user", "coordinator"] }
   ],
   review: [
-    { to: "done", roles: ["user", "coordinator"] },
+    { to: "done", roles: ["user"] },
     { to: "in_progress", roles: ["user", "coordinator"] },
     { to: "cancelled", roles: ["user", "coordinator"] }
   ],

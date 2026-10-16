@@ -144,7 +144,7 @@ export function ConversationSidebar({
     });
   }, [query, works]);
   const workMemberIds = (workId: string) => agents
-    .filter((agent) => agent.settings.workMembership?.binding?.workId === workId)
+    .filter((agent) => Boolean(agent.roomMemberships?.[workId]?.binding))
     .map((agent) => agent.profile.id);
 
   const projection = projectSidebarAgents(visible, organization);

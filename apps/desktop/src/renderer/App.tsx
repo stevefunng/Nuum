@@ -30,6 +30,7 @@ import {
   SettingsOverlay,
   SettingsSelect,
   WorkBoard,
+  RoomSnapshotReplica,
   WorkCreation,
   createRuntimeThemeInstaller,
   readSidebarLayout,
@@ -110,7 +111,6 @@ export function App() {
   const [workSnapshot, setWorkSnapshot] = useState<WorkSnapshot | null>(null);
   const [creatingWork, setCreatingWork] = useState(false);
   const [workNotice, setWorkNotice] = useState<string | null>(null);
-  const [floatingAgentId, setFloatingAgentId] = useState<string | null>(null);
   const [panes, setPanes] = useState<Record<string, AgentPane>>({});
   const [creatingAgent, setCreatingAgent] = useState(false);
   const [creationError, setCreationError] = useState<string | null>(null);
@@ -129,7 +129,12 @@ export function App() {
   const sidebarSave = useRef(Promise.resolve());
   const themeHandle = useRef<ReturnType<typeof createRuntimeThemeInstaller> | null>(null);
   const activeWorkIdRef = useRef<string | null>(null);
-  activeWorkIdRef.current = activeWorkId;
+  const roomReplica = useRef(new RoomSnapshotReplica());
+  function selectWork(id: string | null): void {
+    activeWorkIdRef.current = id;
+    setActiveWorkId(id);
+    setWorkSnapshot(id ? roomReplica.current.get(id) ?? null : null);
+  }
 
   const active = useMemo(
     () => agents.find((agent) => agent.profile.id === activeId) ?? null,
@@ -139,13 +144,6 @@ export function App() {
   const draft = activeId ? pane.draft : "";
   const blocks = projectAgent(pane.events, pane.live).blocks;
   const blockTimestamps = transcriptTimestamps(pane.events);
-  const floatingAgent = useMemo(
-    () => agents.find((agent) => agent.profile.id === floatingAgentId) ?? null,
-    [agents, floatingAgentId]
-  );
-  const floatingPane = (floatingAgentId ? panes[floatingAgentId] : undefined) ?? emptyPane;
-  const floatingBlocks = projectAgent(floatingPane.events, floatingPane.live).blocks;
-  const floatingBlockTimestamps = transcriptTimestamps(floatingPane.events);
 
   function patchPane(id: string, patch: Partial<AgentPane> | ((current: AgentPane) => Partial<AgentPane>)): void {
     setPanes((current) => applyPanePatch(current, id, patch));
@@ -226,6 +224,7 @@ export function App() {
         }));
       }
       if (method === HostEvents.agentEnded && agentId) {
+        if (activeWorkIdRef.current) void loadWork(activeWorkIdRef.current);
         setPanes((current) => applyPanePatch(current, agentId, {
           live: null,
           // 被掐和跑完是两回事，不能都静悄悄地收场。
@@ -276,9 +275,8 @@ export function App() {
     setCreatingAgent(false);
     setCreatingWork(false);
     setCreationError(null);
-    setActiveWorkId(null);
+    selectWork(null);
     setWorkSnapshot(null);
-    setFloatingAgentId(null);
     setActiveId(id);
     await loadAgent(id);
   }
@@ -318,25 +316,24 @@ export function App() {
 
   async function loadWork(id: string): Promise<void> {
     const snapshot = await window.nuum.host.request(HostMethods.workGet, { id }) as WorkSnapshot;
-    setWorkSnapshot(snapshot);
+    if (activeWorkIdRef.current !== id) return;
+    setWorkSnapshot(roomReplica.current.apply(snapshot));
   }
 
   async function openWork(id: string): Promise<void> {
     setCreatingAgent(false);
     setCreatingWork(false);
     setActiveId(null);
-    setActiveWorkId(id);
-    setFloatingAgentId(null);
+    selectWork(id);
     setWorkNotice(null);
     await loadWork(id);
   }
 
   function newAgent(): void {
     setActiveId(null);
-    setActiveWorkId(null);
+    selectWork(null);
     setWorkSnapshot(null);
     setCreatingWork(false);
-    setFloatingAgentId(null);
     setCreationError(null);
     setCreatingAgent(true);
   }
@@ -345,12 +342,11 @@ export function App() {
     setCreatingAgent(false);
     setCreatingWork(true);
     setActiveId(null);
-    setActiveWorkId(null);
+    selectWork(null);
     setWorkSnapshot(null);
-    setFloatingAgentId(null);
   }
 
-  async function createWork(input: { name: string; description: string }): Promise<void> {
+  async function createWork(input: { name: string; description: string; kind?: "room" | "work" }): Promise<void> {
     const created = await window.nuum.host.request(HostMethods.workCreate, {
       ...input,
       projectRoot: null
@@ -420,10 +416,6 @@ export function App() {
     void answerWidgetAgent(activeId, messageId, value);
   }
 
-  function answerFloatingWidget(agentId: string, messageId: string, value: string): void {
-    void answerWidgetAgent(agentId, messageId, value);
-  }
-
   async function approveAgent(id: string, resolution: ToolResolution): Promise<void> {
     const pendingTool = (panes[id] ?? emptyPane).pendingTool;
     if (!pendingTool) return;
@@ -461,23 +453,11 @@ export function App() {
   function moveAgentToWork(agentId: string, workId: string, role: "worker" | "coordinator" | "observer" = "worker"): void {
     const target = agents.find((agent) => agent.profile.id === agentId);
     if (!target) return;
-    const membership = target.settings.workMembership ?? { revision: 0, binding: null };
-    const binding = membership.binding;
-    if (binding?.workId === workId) return;
-    void runWorkMutation(() => binding
-      ? window.nuum.host.request(HostMethods.workMemberMove, {
-          fromWorkId: binding.workId,
-          toWorkId: workId,
-          agentId,
-          role,
-          expectedRevision: membership.revision
-        })
-      : window.nuum.host.request(HostMethods.workMemberAttach, {
-          workId,
-          agentId,
-          role,
-          expectedRevision: membership.revision
-        }));
+    const membership = target.roomMemberships?.[workId] ?? { revision: 0, binding: null };
+    if (membership.binding) return;
+    void runWorkMutation(() => window.nuum.host.request(HostMethods.workMemberAttach, {
+      workId, agentId, role, expectedRevision: membership.revision
+    }));
   }
 
   const secretSaveQueue = useRef(Promise.resolve());
@@ -566,9 +546,12 @@ export function App() {
               id: activeWorkId,
               ...patch
             }))}
+            onContinue={(eventId, inputAfterSeq) => void runWorkMutation(() => window.nuum.host.request(HostMethods.workContinue, { workId: activeWorkId, eventId, inputAfterSeq }))}
+            onStopDiscussion={() => void runWorkMutation(() => window.nuum.host.request(HostMethods.workStopDiscussion, { id: activeWorkId }))}
             onPostMessage={(body) => void runWorkMutation(() => window.nuum.host.request(HostMethods.workPostMessage, {
               workId: activeWorkId,
               body,
+              clientEventId: crypto.randomUUID(),
               mentionedAgentIds: []
             }))}
             onCreateTask={({ title, assigneeIds }) => void runWorkMutation(() => window.nuum.host.request(HostMethods.workTaskCreate, {
@@ -589,6 +572,7 @@ export function App() {
                 ...(blockerReason ? { blocker: { reason: blockerReason } } : {})
               })
             )}
+            onReadTaskTrace={async (taskId, sessionId, beforeSeq) => window.nuum.host.request(HostMethods.workTaskTranscript, { workId: activeWorkId, taskId, sessionId, beforeSeq }) as Promise<{ sessions: { id: string; agentId: string }[]; sessionId?: string; entries: import("@nuum/protocol").TranscriptEvent[]; beforeSeq?: number }>}
             onDispatchTask={(agentId, taskId, instruction) => void runWorkMutation(() =>
               window.nuum.host.request(HostMethods.workDispatch, {
                 workId: activeWorkId,
@@ -604,10 +588,6 @@ export function App() {
                 expectedRevision
               })
             )}
-            onOpenAgent={(agentId) => {
-              setFloatingAgentId(agentId);
-              void loadAgent(agentId);
-            }}
             onAddCatalogEntry={(entry: WorkCatalogAddParams["entry"]) => runWorkMutation(() =>
               window.nuum.host.request(HostMethods.workCatalogAdd, {
                 workId: activeWorkId,
@@ -648,28 +628,7 @@ export function App() {
           />
         )}
         {workNotice ? <div className="sand-work-notice" role="alert">{t(workNotice)}</div> : null}
-        {activeWorkId && floatingAgent && floatingAgentId ? (
-          <div aria-label={t("Conversation with {name}", { name: floatingAgent.profile.name })} className="sand-work-agent-float" role="dialog">
-            <button aria-label={t("Close conversation")} className="sand-work-agent-float__close" onClick={() => setFloatingAgentId(null)} type="button">×</button>
-            <ConversationWorkspace
-              agent={floatingAgent}
-              agents={agents}
-              autoFocusInput
-              blocks={floatingBlocks}
-              blockTimestamps={floatingBlockTimestamps}
-              pendingTool={floatingPane.pendingTool}
-              draft={floatingPane.draft}
-              notice={floatingPane.notice}
-              onDraftChange={(value) => patchPane(floatingAgentId, { draft: value })}
-              onSubmit={() => void sendAgent(floatingAgentId)}
-              onCancel={() => void window.nuum.host.request(HostMethods.agentCancel, { id: floatingAgentId })}
-              onCancelCreate={() => undefined}
-              onCreateAgent={() => undefined}
-              onApprove={(resolution) => void approveAgent(floatingAgentId, resolution)}
-              onAnswerWidget={(messageId, value) => answerFloatingWidget(floatingAgentId, messageId, value)}
-            />
-          </div>
-        ) : null}
+
       </div>
       {active && profileEditorId === active.profile.id && !creatingAgent && !activeWorkId && !creatingWork ? (
         <AgentProfilePanel key={active.profile.id} profile={active.profile} onClose={() => setProfileEditorId(null)} onSave={(patch) => {

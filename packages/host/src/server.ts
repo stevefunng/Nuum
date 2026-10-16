@@ -16,6 +16,7 @@ import {
   WorkCatalogRemoveParams,
   WorkCreateParams,
   WorkDispatchParams,
+  WorkContinueParams,
   WorkIdParams,
   WorkMemberAttachParams,
   WorkMemberDetachParams,
@@ -23,6 +24,7 @@ import {
   WorkPostMessageParams,
   WorkTaskAssignParams,
   WorkTaskCreateParams,
+  WorkTaskTranscriptParams,
   WorkTaskTransitionParams,
   WorkUpdateParams
 } from "@nuum/protocol";
@@ -99,12 +101,20 @@ export async function createHostServer(options: HostRuntimeOptions): Promise<Hos
         return runtime.detachWorkMember(WorkMemberDetachParams.parse(raw));
       case HostMethods.workMemberMove:
         return runtime.moveWorkMember(WorkMemberMoveParams.parse(raw));
+      case HostMethods.workTaskTranscript:
+        return runtime.getWorkTaskTranscript(WorkTaskTranscriptParams.parse(raw));
       case HostMethods.workTaskCreate:
         return runtime.createWorkTask(WorkTaskCreateParams.parse(raw));
       case HostMethods.workTaskAssign:
         return runtime.assignWorkTask(WorkTaskAssignParams.parse(raw));
       case HostMethods.workTaskTransition:
         return runtime.transitionWorkTask(WorkTaskTransitionParams.parse(raw));
+      case HostMethods.workContinue: {
+        const params = WorkContinueParams.parse(raw);
+        return runtime.continueWork(params.workId, params.eventId, params.inputAfterSeq);
+      }
+      case HostMethods.workStopDiscussion:
+        return runtime.stopWorkDiscussion(WorkIdParams.parse(raw).id);
       case HostMethods.workDispatch:
         return runtime.dispatchWork(WorkDispatchParams.parse(raw));
       case HostMethods.workCatalogAdd:

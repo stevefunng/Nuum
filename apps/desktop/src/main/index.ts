@@ -20,6 +20,8 @@ function findRepoRoot(start: string): string {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = findRepoRoot(here);
+// Isolated local smoke runs can keep test state outside the user's normal profile.
+if (process.env.NUUM_USER_DATA_DIR) app.setPath("userData", path.resolve(process.env.NUUM_USER_DATA_DIR));
 const dataDir = path.join(app.getPath("userData"), "data");
 mkdirSync(dataDir, { recursive: true });
 

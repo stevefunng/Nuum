@@ -23,11 +23,19 @@ export class JsonRpcPeer {
     { resolve: (value: unknown) => void; reject: (error: unknown) => void }
   >();
   private seq = 0;
+  private closed: Error | undefined;
   private handler: RpcHandler | undefined;
   private eventHandler: RpcEventHandler | undefined;
 
   constructor(private readonly duplex: ByteDuplex) {
     duplex.onLine((line) => this.receive(line));
+  }
+
+  close(error = new Error("RPC connection closed")): void {
+    if (this.closed) return;
+    this.closed = error;
+    for (const waiter of this.pending.values()) waiter.reject(error);
+    this.pending.clear();
   }
 
   setHandler(handler: RpcHandler): void {
@@ -39,16 +47,19 @@ export class JsonRpcPeer {
   }
 
   async request(method: string, params?: unknown): Promise<unknown> {
+    if (this.closed) throw this.closed;
     const id = String(++this.seq);
     const frame: JsonRpcRequest = { jsonrpc: "2.0", id, method, params };
     const result = new Promise<unknown>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
     });
-    this.duplex.write(JSON.stringify(frame));
+    try { this.duplex.write(JSON.stringify(frame)); }
+    catch (error) { this.close(error instanceof Error ? error : new Error(String(error))); }
     return result;
   }
 
   notify(method: string, params?: unknown): void {
+    if (this.closed) return;
     const frame: JsonRpcEvent = { jsonrpc: "2.0", method, params };
     this.duplex.write(JSON.stringify(frame));
   }
@@ -87,6 +98,7 @@ export class JsonRpcPeer {
 
   private async dispatch(request: JsonRpcRequest): Promise<void> {
     const reply = (body: Omit<JsonRpcResponse, "jsonrpc" | "id">): void => {
+      if (this.closed) return;
       const frame: JsonRpcResponse = { jsonrpc: "2.0", id: request.id as JsonRpcId, ...body };
       this.duplex.write(JSON.stringify(frame));
     };

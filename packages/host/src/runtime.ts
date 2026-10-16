@@ -1,3 +1,9 @@
+import { summarizePrefix } from "./compaction.js";
+import { discussionResponders, runDiscussion, isPass, discussionLimits } from "./room-discussion.js";
+import { workIntent, currentCardSource, pendingCardDelegation } from "./work-execution.js";
+import { selectRoomInput } from "./room-context.js";
+import { SessionStore } from "./session-store.js";
+import type { TranscriptDraft, WorkSendMessageParams, CreateTaskParams, ClaimTaskParams, ReadTaskParams, WorkActor } from "@nuum/protocol";
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir, platform, release } from "node:os";
@@ -100,7 +106,7 @@ import {
   type AgentIdentity
 } from "./prompt.js";
 import { DIRECT_RUN_CONTEXT, type RunContext } from "./run-context.js";
-import { AgentScheduler, DEFAULT_MAX_CONCURRENT_RUNS } from "./scheduler.js";
+import { AgentScheduler, DEFAULT_MAX_CONCURRENT_RUNS, type SubmittedRun } from "./scheduler.js";
 import { MAX_AGENTS, WakeQueue, currentHops, pendingWake } from "./wake.js";
 import { WorkStore, projectWork } from "./work-store.js";
 import { allowedTaskTransitions, assertTaskTransition } from "./work-task-policy.js";
@@ -130,6 +136,7 @@ export interface HostRuntimeOptions {
 export class HostRuntime implements Partial<DelegateHost> {
   readonly store: AgentStore;
   readonly workStore: WorkStore;
+  readonly sessions: SessionStore;
   readonly scheduler: AgentScheduler;
   readonly proactive: ProactiveService;
   private settings!: Settings;
@@ -159,6 +166,7 @@ export class HostRuntime implements Partial<DelegateHost> {
   constructor(private readonly options: HostRuntimeOptions) {
     this.store = new AgentStore(options.dataDir);
     this.workStore = new WorkStore(options.dataDir);
+    this.sessions = new SessionStore(options.dataDir);
     this.proactive = new ProactiveService(this.store, () => this.settings.defaultModel, (agentId) => {
       if (agentId && this.store.getAgent(agentId)) this.background(this.viewFor(this.store.requireAgent(agentId)).then((agent) => this.emit(HostEvents.agentUpdated, { agent })));
       this.emit(HostEvents.proactiveUpdated, {});
@@ -178,14 +186,22 @@ export class HostRuntime implements Partial<DelegateHost> {
   async start(): Promise<void> {
     await this.store.init();
     await this.workStore.init();
+    await this.workStore.migrateMemberships(this.store.listAgents());
+    await this.workStore.migrateExecutionHistory();
     this.settings = await this.store.readSettings();
     this.attachKernel();
     this.proactive.start();
     // 重放放最后：它要 kernel 在位，而且不该拖慢 RPC 上线。
     this.background(this.replayPendingWakes());
+    this.background(this.replayWorkDispatches());
   }
 
   async dispose(): Promise<void> {
+    this.disposing = true;
+    this.scheduler.close();
+    const summaryRuns = [...this.compactJobs.keys()];
+    this.compactJobs.clear();
+    await Promise.allSettled(summaryRuns.map(runId => this.kernel?.cancelSummary?.(`${runId}:compact`)));
     await this.proactive.dispose();
     await Promise.allSettled([...this.pending, ...this.kernelEventChains.values()]);
     this.kernel?.dispose();
@@ -199,7 +215,14 @@ export class HostRuntime implements Partial<DelegateHost> {
     const client = spawn(this.options.kernelCommand, this.options.kernelArgs);
     this.kernel = client;
     client.onEvent((method, params) => this.enqueueKernelEvent(method, params));
+    client.onExit?.(() => {
+      if (this.disposing || this.kernel !== client) return;
+      this.kernel = null;
+      this.scheduler.close();
+      this.emit(HostEvents.kernelDown, { at: Date.now() });
+    });
     void client.hello().catch(() => {
+      if (this.kernel !== client || this.disposing) return;
       this.kernel = null;
       this.emit(HostEvents.kernelDown, { at: Date.now() });
     });
@@ -207,7 +230,7 @@ export class HostRuntime implements Partial<DelegateHost> {
       if (Array.isArray(list)) {
         this.toolCache.splice(0, this.toolCache.length, ...(list as ToolDefinition[]));
       }
-    });
+    }).catch(() => { /* Kernel exit is reported by the lifecycle handler. */ });
   }
 
   getPublicSettings() {
@@ -335,6 +358,7 @@ export class HostRuntime implements Partial<DelegateHost> {
   async createWork(params: WorkCreateParams): Promise<WorkProfile> {
     const profile = await this.workStore.createWork({
       id: crypto.randomUUID(),
+      kind: params.kind ?? "work",
       name: params.name.trim(),
       description: params.description.trim(),
       projectRoot: params.projectRoot ? path.resolve(params.projectRoot) : null,
@@ -358,6 +382,7 @@ export class HostRuntime implements Partial<DelegateHost> {
 
   async updateWork(params: WorkUpdateParams): Promise<WorkProfile> {
     const profile = await this.workStore.updateWork(params.id, {
+      ...(params.kind ? { kind: params.kind } : {}),
       ...(params.name !== undefined ? { name: params.name.trim() } : {}),
       ...(params.description !== undefined ? { description: params.description.trim() } : {}),
       ...(params.projectRoot !== undefined
@@ -378,21 +403,33 @@ export class HostRuntime implements Partial<DelegateHost> {
     const members = await Promise.all(
       this.store
         .listAgents()
-        .filter((record) => record.settings.workMembership?.binding?.workId === id)
-        .map((record) => this.viewFor(record))
+        .filter((record) => Boolean(this.workStore.membership(id, record.profile.id).binding))
+        .map((record) => this.viewFor(record, id))
     );
     return {
       profile,
       members,
       catalog,
       events,
+      throughSeq: events.at(-1)?.seq ?? 0,
+      discussionRunning: !!this.discussions.get(id) && !this.discussions.get(id)!.stopped,
+      interruptions: this.workInterruptions(events),
       tasks: projection.tasks.map((task) => this.workTaskView(task)),
       chat: projection.chat
     };
   }
 
   async postWorkMessage(params: WorkPostMessageParams) {
+    return this.inRoom(params.workId, async () => {
     this.workStore.requireWork(params.workId);
+    if (params.inputAfterSeq !== undefined && params.inputAfterSeq > ((await this.workStore.readTimeline(params.workId)).at(-1)?.seq ?? 0)) throw new Error("Invalid room history start sequence");
+    if (params.clientEventId) {
+      const previous = (await this.workStore.readTimeline(params.workId)).find(event => event.clientEventId === params.clientEventId);
+      if (previous) {
+        if (previous.type !== "chat.posted" || previous.body !== params.body.trim() || JSON.stringify(previous.mentionedAgentIds) !== JSON.stringify(params.mentionedAgentIds) || previous.inputAfterSeq !== params.inputAfterSeq) throw new Error("Message retry conflicts with the original request");
+        return previous;
+      }
+    }
     const event = await this.workStore.appendEvent(params.workId, {
       type: "chat.posted",
       id: crypto.randomUUID(),
@@ -401,49 +438,148 @@ export class HostRuntime implements Partial<DelegateHost> {
       actor: { kind: "user", id: "local-user" },
       messageId: crypto.randomUUID(),
       body: params.body.trim(),
+      clientEventId: params.clientEventId,
+      inputAfterSeq: params.inputAfterSeq,
       mentionedAgentIds: params.mentionedAgentIds
     });
     this.emit(HostEvents.workEventAppended, { workId: params.workId, event });
+    this.enqueueDiscussion(event);
+    return event;
+    });
+  }
+
+  private readonly discussionQueues = new Map<string, WorkEvent[]>();
+  private readonly discussionDrivers = new Map<string, Promise<void>>();
+  private readonly discussions = new Map<string, {
+    id: string; stopped: boolean; superseded: boolean; total: number; hasStarted: boolean; triggers: WorkEvent[];
+    perExecution: Map<string, number>; replies: { body: string; mentionedAgentIds: string[] }[];
+    runId?: string;
+  }>();
+  private readonly submittedWork = new Map<string, SubmittedRun>();
+  private readonly cancelledExecutions = new Set<string>();
+
+  private enqueueDiscussion(event: WorkEvent): void {
+    if (this.disposing || event.type !== "chat.posted" || event.actor.kind !== "user") return;
+    const queue = this.discussionQueues.get(event.workId) ?? [];
+    if (!queue.some(item => item.id === event.id)) queue.push(event);
+    this.discussionQueues.set(event.workId, queue);
+    const current = this.discussions.get(event.workId);
+    if (current) {
+      if (!current.hasStarted) {
+        for (const trigger of [...current.triggers].reverse()) if (!queue.some(item => item.id === trigger.id)) queue.unshift(trigger);
+      }
+      current.superseded = true;
+      if (current.runId) this.scheduler.cancelQueued(current.runId);
+    }
+    if (this.discussionDrivers.has(event.workId)) return;
+    const driver = this.runRoomDiscussions(event.workId).finally(() => {
+      this.discussionDrivers.delete(event.workId);
+      const next = this.discussionQueues.get(event.workId)?.[0];
+      if (next && !this.disposing) this.enqueueDiscussion(next);
+    });
+    this.discussionDrivers.set(event.workId, driver);
+    this.background(driver);
+  }
+
+  private async runRoomDiscussions(workId: string): Promise<void> {
+    while (!this.disposing && this.discussionQueues.get(workId)?.length) {
+      const triggers = this.discussionQueues.get(workId)!.splice(0);
+      const id = crypto.randomUUID();
+      const inputAfterSeq = triggers.reduce<number | undefined>((value, event) => event.type === "chat.posted" && event.inputAfterSeq !== undefined ? Math.max(value ?? 0, event.inputAfterSeq) : value, undefined);
+      const live = { id, stopped: false, superseded: false, total: 0, hasStarted: false, triggers, perExecution: new Map<string, number>(), replies: [] as { body: string; mentionedAgentIds: string[] }[], runId: undefined as string | undefined };
+      let hadFailure = false;
+      let discussionError: string | undefined;
+      this.discussions.set(workId, live);
+      const start = await this.appendWorkEvent(workId, {
+        type: "discussion.started", id, workId, createdAt: Date.now(), actor: { kind: "system", id: "host" }, triggerEventIds: triggers.map(event => event.id)
+      });
+      const membershipEvents = await this.workStore.readTimeline(workId);
+      const memberIds = [...new Set(membershipEvents.filter(event => event.type === "member.attached").map(event => event.agentId))];
+      const members = memberIds.flatMap(agentId => {
+        const agent = this.store.getAgent(agentId);
+        return agent && this.workStore.membership(workId, agentId).binding?.grants.canPost ? [{ id: agentId, name: agent.profile.name }] : [];
+      });
+      try {
+        await runDiscussion({
+          current: () => !this.disposing && !live.stopped && !live.superseded,
+          responders: async () => discussionResponders(members, [
+            ...triggers.filter((event): event is Extract<WorkEvent, { type: "chat.posted" }> => event.type === "chat.posted"), ...live.replies
+          ]).map(member => member.id),
+          runMember: async agentId => {
+            if (!this.workStore.membership(workId, agentId).binding?.grants.canPost) return { messages: 0 };
+            const before = live.total;
+            try {
+              const submitted = await this.scheduleWork({ workId, agentId, instruction: `Discuss the user's messages ${triggers.map(event => event.id).join(", ")}. Use SendMessage for at most two short replies; remain silent or send (pass) if you have nothing useful to add.` },
+                { kind: "user", id: "local-user" }, start.id, crypto.randomUUID(), id, inputAfterSeq);
+              live.runId = submitted.runId;
+              if (live.superseded || live.stopped) this.scheduler.cancelQueued(submitted.runId);
+              const status = await submitted.completed;
+              live.runId = undefined;
+              hadFailure ||= status !== "completed" && !live.stopped && !live.superseded;
+              return { messages: live.total - before, failed: status === "failed" };
+            } catch (error) {
+              hadFailure = true;
+              this.emit(HostEvents.agentError, { agentId, message: String(error) });
+              return { messages: live.total - before, failed: true };
+            }
+          }
+        });
+      } catch (error) {
+        hadFailure = true;
+        discussionError = error instanceof Error ? error.message : String(error);
+      } finally {
+        this.discussions.delete(workId);
+        if (!this.disposing) await this.endDiscussion(workId, id, live.stopped ? "cancelled" : hadFailure && !live.superseded ? "interrupted" : "completed", discussionError);
+      }
+    }
+  }
+
+  private async endDiscussion(workId: string, discussionId: string, status: "completed" | "cancelled" | "interrupted", error?: string) {
+    await this.inRoom(workId, async () => {
+      const events = await this.workStore.readTimeline(workId);
+      if (events.some(event => event.type === "discussion.finished" && event.discussionId === discussionId)) return;
+      await this.appendWorkEvent(workId, { type: "discussion.finished", id: `end:${discussionId}`, clientEventId: `end:${discussionId}`,
+        workId, createdAt: Date.now(), actor: { kind: "system", id: "host" }, discussionId, status, error });
+    });
+  }
+
+  async stopWorkDiscussion(workId: string): Promise<{ ok: true }> {
+    this.workStore.requireWork(workId);
+    const live = this.discussions.get(workId);
+    if (live) live.stopped = true;
+    const queued = this.discussionQueues.get(workId)?.splice(0) ?? [];
+    if (queued.length) {
+      const start = await this.appendWorkEvent(workId, { type: "discussion.started", id: crypto.randomUUID(), workId, createdAt: Date.now(), actor: { kind: "user", id: "local-user" }, triggerEventIds: queued.map(event => event.id) });
+      await this.endDiscussion(workId, start.id, "cancelled");
+    }
+    if (!live) return { ok: true };
+    await this.endDiscussion(workId, live.id, "cancelled");
+    if (live.runId) {
+      const context = this.scheduler.contextFor(live.runId);
+      if (context?.kind === "work" && context.bridgeId) this.cancelledExecutions.add(context.bridgeId);
+      if (!this.scheduler.cancelQueued(live.runId)) await this.kernel?.cancel(live.runId);
+    }
+    return { ok: true };
+  }
+
+  private async appendWorkEvent(workId: string, draft: import("@nuum/protocol").WorkEventDraft) {
+    const event = await this.workStore.appendEvent(workId, draft);
+    this.emit(HostEvents.workEventAppended, { workId, event });
     return event;
   }
 
   async attachWorkMember(params: WorkMemberAttachParams): Promise<AgentView> {
     this.workStore.requireWork(params.workId);
     const record = this.store.requireAgent(params.agentId);
-    const membership = currentMembership(record);
+    const membership = this.workStore.membership(params.workId, params.agentId);
     this.assertMembershipRevision(membership.revision, params.expectedRevision);
-    if (membership.binding) {
-      throw new RpcError(
-        HostErrorCode.WORK_CONFLICT,
-        `Agent already belongs to Work ${membership.binding.workId}; move it instead`
-      );
-    }
-    const operationId = crypto.randomUUID();
-    const updated = await this.store.updateAgent(params.agentId, {
-      settings: {
-        workMembership: {
-          revision: membership.revision + 1,
-          binding: {
-            workId: params.workId,
-            role: params.role,
-            joinedAt: Date.now(),
-            grants: grantsForRole(params.role)
-          }
-        }
-      }
-    });
+    if (membership.binding) throw new RpcError(HostErrorCode.WORK_CONFLICT, "Already a member of this room");
     const event = await this.workStore.appendEvent(params.workId, {
-      type: "member.attached",
-      id: crypto.randomUUID(),
-      workId: params.workId,
-      createdAt: Date.now(),
-      actor: { kind: "user", id: "local-user" },
-      membershipOperationId: operationId,
-      agentId: params.agentId,
-      role: params.role,
-      membershipRevision: membership.revision + 1
+      type: "member.attached", id: crypto.randomUUID(), workId: params.workId, createdAt: Date.now(),
+      actor: { kind: "user", id: "local-user" }, membershipOperationId: crypto.randomUUID(),
+      agentId: params.agentId, role: params.role, membershipRevision: membership.revision + 1
     });
-    const view = await this.viewFor(updated);
+    const view = await this.viewFor(record);
     this.emit(HostEvents.agentUpdated, { agent: view });
     this.emit(HostEvents.workEventAppended, { workId: params.workId, event });
     this.emit(HostEvents.workUpdated, { work: this.workStore.getWork(params.workId) });
@@ -452,94 +588,39 @@ export class HostRuntime implements Partial<DelegateHost> {
 
   async detachWorkMember(params: WorkMemberDetachParams): Promise<AgentView> {
     const record = this.store.requireAgent(params.agentId);
-    const membership = currentMembership(record);
+    const membership = this.workStore.membership(params.workId, params.agentId);
     this.assertMembershipRevision(membership.revision, params.expectedRevision);
-    if (membership.binding?.workId !== params.workId) {
-      throw new RpcError(HostErrorCode.WORK_CONFLICT, "Agent is not attached to this Work");
-    }
+    if (!membership.binding) throw new RpcError(HostErrorCode.WORK_CONFLICT, "Not a member of this room");
     this.assertNotRunningWork(params.agentId, params.workId);
-    const operationId = crypto.randomUUID();
-    const updated = await this.store.updateAgent(params.agentId, {
-      settings: {
-        workMembership: { revision: membership.revision + 1, binding: null }
-      }
-    });
     const event = await this.workStore.appendEvent(params.workId, {
-      type: "member.detached",
-      id: crypto.randomUUID(),
-      workId: params.workId,
-      createdAt: Date.now(),
-      actor: { kind: "user", id: "local-user" },
-      membershipOperationId: operationId,
-      agentId: params.agentId,
-      membershipRevision: membership.revision + 1
+      type: "member.detached", id: crypto.randomUUID(), workId: params.workId, createdAt: Date.now(),
+      actor: { kind: "user", id: "local-user" }, membershipOperationId: crypto.randomUUID(),
+      agentId: params.agentId, membershipRevision: membership.revision + 1
     });
-    const view = await this.viewFor(updated);
+    const view = await this.viewFor(record);
     this.emit(HostEvents.agentUpdated, { agent: view });
     this.emit(HostEvents.workEventAppended, { workId: params.workId, event });
     this.emit(HostEvents.workUpdated, { work: this.workStore.getWork(params.workId) });
     return view;
   }
 
-  async moveWorkMember(params: WorkMemberMoveParams): Promise<AgentView> {
-    if (params.fromWorkId === params.toWorkId) {
-      throw new RpcError(HostErrorCode.WORK_CONFLICT, "Source and destination Work are the same");
-    }
-    this.workStore.requireWork(params.fromWorkId);
-    this.workStore.requireWork(params.toWorkId);
-    const record = this.store.requireAgent(params.agentId);
-    const membership = currentMembership(record);
-    this.assertMembershipRevision(membership.revision, params.expectedRevision);
-    if (membership.binding?.workId !== params.fromWorkId) {
-      throw new RpcError(HostErrorCode.WORK_CONFLICT, "Agent is not attached to the source Work");
-    }
-    this.assertNotRunningWork(params.agentId, params.fromWorkId);
-    const operationId = crypto.randomUUID();
-    const revision = membership.revision + 1;
-    const updated = await this.store.updateAgent(params.agentId, {
-      settings: {
-        workMembership: {
-          revision,
-          binding: {
-            workId: params.toWorkId,
-            role: params.role,
-            joinedAt: Date.now(),
-            grants: grantsForRole(params.role)
-          }
-        }
-      }
-    });
-    const detached = await this.workStore.appendEvent(params.fromWorkId, {
-      type: "member.detached",
-      id: crypto.randomUUID(),
-      workId: params.fromWorkId,
-      createdAt: Date.now(),
-      actor: { kind: "user", id: "local-user" },
-      membershipOperationId: operationId,
-      agentId: params.agentId,
-      membershipRevision: revision
-    });
-    const attached = await this.workStore.appendEvent(params.toWorkId, {
-      type: "member.attached",
-      id: crypto.randomUUID(),
-      workId: params.toWorkId,
-      createdAt: Date.now(),
-      actor: { kind: "user", id: "local-user" },
-      membershipOperationId: operationId,
-      agentId: params.agentId,
-      role: params.role,
-      membershipRevision: revision
-    });
-    const view = await this.viewFor(updated);
-    this.emit(HostEvents.agentUpdated, { agent: view });
-    this.emit(HostEvents.workEventAppended, { workId: params.fromWorkId, event: detached });
-    this.emit(HostEvents.workEventAppended, { workId: params.toWorkId, event: attached });
-    this.emit(HostEvents.workUpdated, { work: this.workStore.getWork(params.fromWorkId) });
-    this.emit(HostEvents.workUpdated, { work: this.workStore.getWork(params.toWorkId) });
-    return view;
+  async moveWorkMember(_params: WorkMemberMoveParams): Promise<AgentView> {
+    throw new RpcError(HostErrorCode.WORK_CONFLICT, "Rooms now have independent membership. Attach to the new room, then explicitly remove from the old room.");
   }
 
-  async createWorkTask(params: WorkTaskCreateParams): Promise<WorkTaskView> {
+  async getWorkTaskTranscript(params: { workId: string; taskId: string; sessionId?: string; beforeSeq?: number }) {
+    await this.requireWorkTask(params.workId, params.taskId);
+    const sessions = await this.sessions.list(params.workId, params.taskId);
+    const session = params.sessionId ? sessions.find((entry) => entry.id === params.sessionId) : sessions[0];
+    if (params.sessionId && !session) throw new RpcError(HostErrorCode.WORK_NOT_FOUND, "Card session not found");
+    const all = session ? await this.sessions.read(session) : [];
+    const filtered = all.filter((event) => params.beforeSeq === undefined || event.seq < params.beforeSeq);
+    const entries = filtered.slice(-100);
+    return { sessions, sessionId: session?.id, entries, beforeSeq: filtered.length > entries.length ? entries[0]?.seq : undefined };
+  }
+
+  async createWorkTask(params: WorkTaskCreateParams, actor: WorkActor = { kind: "user", id: "local-user" }, commandId?: string): Promise<WorkTaskView> {
+    if (this.workStore.getWork(params.workId).kind === "room") throw new RpcError(HostErrorCode.WORK_CONFLICT, "Enable the task board before creating cards");
     await this.assertWorkAssignees(params.workId, params.assigneeIds);
     const now = Date.now();
     const task: WorkTask = {
@@ -547,7 +628,8 @@ export class HostRuntime implements Partial<DelegateHost> {
       title: params.title.trim(),
       description: params.description.trim(),
       acceptanceCriteria: params.acceptanceCriteria,
-      state: "proposed",
+      state: "ready",
+      ...(actor.kind === "agent" ? { ownerAgentId: actor.id } : {}),
       assigneeIds: params.assigneeIds,
       dependencyIds: params.dependencyIds,
       priority: params.priority,
@@ -561,11 +643,12 @@ export class HostRuntime implements Partial<DelegateHost> {
       id: crypto.randomUUID(),
       workId: params.workId,
       createdAt: now,
-      actor: { kind: "user", id: "local-user" },
+      actor,
+      clientEventId: commandId,
       task
     });
     this.emit(HostEvents.workEventAppended, { workId: params.workId, event });
-    return this.workTaskView(task);
+    return this.workTaskView(event.type === "task.created" ? event.task : task);
   }
 
   async assignWorkTask(params: WorkTaskAssignParams): Promise<WorkTaskView> {
@@ -581,7 +664,7 @@ export class HostRuntime implements Partial<DelegateHost> {
       taskId: params.taskId,
       assigneeIds: params.assigneeIds,
       revision: task.revision + 1
-    });
+    }, { taskId: task.id, revision: task.revision });
     this.emit(HostEvents.workEventAppended, { workId: params.workId, event });
     return this.workTaskView(await this.requireWorkTask(params.workId, params.taskId));
   }
@@ -604,98 +687,108 @@ export class HostRuntime implements Partial<DelegateHost> {
       to: params.to,
       revision: task.revision + 1,
       ...(params.blocker ? { blocker: params.blocker } : {})
-    });
+    }, { taskId: task.id, revision: task.revision });
     this.emit(HostEvents.workEventAppended, { workId: params.workId, event });
+    this.background(this.deliverCardEvent(event));
     return this.workTaskView(await this.requireWorkTask(params.workId, params.taskId));
   }
 
-  async dispatchWork(params: WorkDispatchParams): Promise<{ ok: true; runId: string; queued: boolean }> {
-    return this.dispatchWorkFrom(params, { kind: "user", id: "local-user" });
+  private disposing = false;
+  private readonly roomChains = new Map<string, Promise<unknown>>();
+
+  private async inRoom<T>(workId: string, action: () => Promise<T>): Promise<T> {
+    const prior = this.roomChains.get(workId) ?? Promise.resolve();
+    const next = prior.catch(() => undefined).then(action);
+    this.roomChains.set(workId, next);
+    try { return await next; }
+    finally { if (this.roomChains.get(workId) === next) this.roomChains.delete(workId); }
   }
 
-  private async dispatchWorkFrom(
-    params: WorkDispatchParams,
-    requestedBy: { kind: "user" | "agent"; id: string }
-  ): Promise<{ ok: true; runId: string; queued: boolean }> {
-    const work = this.workStore.getWork(params.workId);
-    const agent = this.store.requireAgent(params.agentId);
-    if (agent.settings.workMembership?.binding?.workId !== params.workId) {
-      throw new RpcError(HostErrorCode.WORK_FORBIDDEN, "Agent is not a member of this Work");
-    }
-    if (this.scheduler.isBusy(params.agentId)) {
-      throw new RpcError(HostErrorCode.AGENT_BUSY, "Agent is already running a turn");
-    }
-    if (this.agentHasPending(params.agentId)) {
-      throw new RpcError(HostErrorCode.AGENT_BUSY, "Resolve the Agent's pending tool before dispatching Work");
-    }
-    const model = resolveSessionModel({
-      sessionModel: agent.settings.model,
-      defaultModel: this.settings.defaultModel,
-      secrets: this.store.secrets
+  private async delegateCard(params: WorkDispatchParams, actor: { kind: "agent" | "user"; id: string }, commandId?: string): Promise<{ ok: true; runId: string; queued: boolean }> {
+    return this.inRoom(params.workId, async () => {
+      const prior = commandId ? (await this.workStore.readTimeline(params.workId)).find(event => event.clientEventId === commandId && event.type === "task.delegated") : undefined;
+      if (prior?.type === "task.delegated") return (await this.deliverCardEventNow(prior)) ?? { ok: true, runId: prior.id, queued: true };
+      const task = await this.requireWorkTask(params.workId, params.taskId!);
+      if (["blocked", "review", "done", "cancelled"].includes(task.state)) throw new RpcError(HostErrorCode.WORK_CONFLICT, "Card is blocked or awaiting human review; a human must resume it before dispatch");
+      const pending = pendingCardDelegation(await this.workStore.readTimeline(params.workId), task.id);
+      if (pending) throw new RpcError(HostErrorCode.WORK_CONFLICT, "This card already has a worker awaiting a result. Continue that execution or cancel the card first.");
+      const member = this.workStore.membership(params.workId, params.agentId);
+      if (!member.binding || !member.binding.grants.canManageOwnTasks) throw new RpcError(HostErrorCode.WORK_FORBIDDEN, "Target is not an executable room member");
+      const event = await this.workStore.appendEvent(params.workId, {
+        type: "task.delegated", id: crypto.randomUUID(), workId: params.workId, actor, createdAt: Date.now(),
+        clientEventId: commandId, taskId: task.id, agentId: params.agentId, instruction: params.instruction,
+        membershipRevision: member.revision, revision: task.revision + 1, messageId: crypto.randomUUID()
+      }, { taskId: task.id, revision: task.revision });
+      this.emit(HostEvents.workEventAppended, { workId: params.workId, event });
+      return (await this.deliverCardEventNow(event))!;
     });
-    precheck({ exists: true, busy: false, model, secrets: this.store.secrets });
+  }
+
+  private async deliverCardEvent(event: import("@nuum/protocol").WorkEvent): Promise<void> {
+    if (this.disposing) return;
+    await this.inRoom(event.workId, async () => { await this.deliverCardEventNow(event); });
+  }
+
+  private async deliverCardEventNow(event: WorkEvent): Promise<{ ok: true; runId: string; queued: boolean } | undefined> {
+    const events = await this.workStore.readTimeline(event.workId);
+    if (events.some(item => item.type === "history.imported" && item.unconfirmedEventIds.includes(event.id))) return;
+    const task = "taskId" in event && event.taskId ? projectWork(events).tasks.find(task => task.id === event.taskId) : undefined;
+    const intent = workIntent(event, task);
+    if (!intent) return;
+    const executionId = `execute:${event.id}:${intent.agentId}`;
+    const submitted = this.submittedWork.get(executionId);
+    if (submitted) return { ok: true, runId: submitted.runId, queued: submitted.state === "queued" };
+    if (events.some(item => (item.type === "execution.started" || item.type === "execution.finished") && item.executionId === executionId)) return;
+    // Legacy deliveries are uncertain. They are exposed for explicit continuation, never replayed.
+    if (events.some(item => item.type === "dispatch.requested" && item.causationId === event.id)) return;
+    if (intent.taskId && (!task || task.state !== "in_progress" || !currentCardSource(events, event, intent.taskId))) return;
+    const membership = this.workStore.membership(event.workId, intent.agentId);
+    if (!membership.binding || !this.store.getAgent(intent.agentId) || ("membershipRevision" in event && event.membershipRevision !== undefined && membership.revision !== event.membershipRevision)) {
+      await this.appendWorkEvent(event.workId, {
+        type: "execution.finished", id: `finish:${executionId}`, workId: event.workId, createdAt: Date.now(), actor: { kind: "system", id: "host" },
+        executionId, sourceEventId: event.id, agentId: intent.agentId, taskId: intent.taskId, status: "failed",
+        error: "The assigned member is no longer available with the original room membership. Restore membership or assign another worker."
+      });
+      return;
+    }
+    const run = await this.scheduleWork({ workId: event.workId, ...intent }, event.actor.kind === "agent" ? event.actor : { kind: "user", id: event.actor.id }, event.id, executionId, undefined, event.type === "work.requested" ? event.inputAfterSeq : undefined);
+    return { ok: true, runId: run.runId, queued: run.state === "queued" };
+  }
+
+  async dispatchWork(params: WorkDispatchParams): Promise<{ ok: true; runId: string; queued: boolean }> {
     if (params.taskId) {
-      const task = await this.requireWorkTask(params.workId, params.taskId);
-      if (!task.assigneeIds.includes(params.agentId)) {
-        throw new RpcError(HostErrorCode.WORK_FORBIDDEN, "Assign the task to this Agent before dispatching it");
-      }
+      const result = await this.delegateCard(params, { kind: "user", id: "local-user" });
+      await [...this.submittedWork.values()].find(run => run.runId === result.runId)?.started;
+      return result;
     }
-    if (!this.kernel) throw new RpcError(HostErrorCode.KERNEL_DOWN, "Kernel is not available");
+    const event = await this.appendWorkEvent(params.workId, {
+      type: "work.requested", id: crypto.randomUUID(), workId: params.workId, createdAt: Date.now(), actor: { kind: "user", id: "local-user" },
+      agentId: params.agentId, instruction: params.instruction.trim(), membershipRevision: this.workStore.membership(params.workId, params.agentId).revision
+    });
+    const result = await this.inRoom(params.workId, () => this.deliverCardEventNow(event));
+    if (!result) throw new Error("Work target is no longer available");
+    await this.submittedWork.get(`execute:${event.id}:${params.agentId}`)?.started;
+    return result;
+  }
 
+  private async scheduleWork(params: WorkDispatchParams, requestedBy: { kind: "user" | "agent"; id: string }, sourceEventId: string, executionId: string, discussionId?: string, inputAfterSeq?: number): Promise<SubmittedRun> {
+    if (this.disposing) throw new Error("Host is stopping");
+    this.store.requireAgent(params.agentId);
+    const membership = this.workStore.membership(params.workId, params.agentId);
+    if (!membership.binding?.grants.canPost) throw new RpcError(HostErrorCode.WORK_FORBIDDEN, "Agent cannot execute in this room");
     const catalog = await this.workStore.readCatalog(params.workId);
-    const bridgeId = crypto.randomUUID();
-    const requested = await this.workStore.appendEvent(params.workId, {
-      type: "dispatch.requested",
-      id: crypto.randomUUID(),
-      workId: params.workId,
-      createdAt: Date.now(),
-      actor: requestedBy,
-      bridgeId,
-      agentId: params.agentId,
-      ...(params.taskId ? { taskId: params.taskId } : {}),
-      instruction: params.instruction.trim()
-    });
-    const wake = await this.store.appendEvent(params.agentId, {
-      type: "wake",
-      id: crypto.randomUUID(),
-      source: {
-        kind: "work",
-        workId: params.workId,
-        workName: work.name,
-        bridgeId,
-        ...(params.taskId ? { taskId: params.taskId } : {})
-      },
-      text: params.instruction.trim(),
-      hops: 0,
-      createdAt: Date.now()
-    });
-    const acknowledged = await this.workStore.appendEvent(params.workId, {
-      type: "dispatch.acknowledged",
-      id: crypto.randomUUID(),
-      workId: params.workId,
-      createdAt: Date.now(),
-      actor: { kind: "system", id: "host" },
-      causationId: requested.id,
-      bridgeId,
-      agentId: params.agentId,
-      transcriptEventId: wake.id
-    });
-    this.emit(HostEvents.workEventAppended, { workId: params.workId, event: requested });
-    this.emit(HostEvents.agentMessageCompleted, { agentId: params.agentId, event: wake });
-    this.emit(HostEvents.workEventAppended, { workId: params.workId, event: acknowledged });
-
+    const session = params.taskId ? await this.sessions.ensure(params.workId, params.taskId, params.agentId, membership.revision) : undefined;
     const submitted = this.launch(params.agentId, {
-      kind: "work",
-      workId: params.workId,
-      ...(params.taskId ? { taskId: params.taskId } : {}),
-      triggerEventId: requested.id,
-      catalogRevision: catalog.revision,
-      catalog: catalog.entries,
-      requestedBy
+      kind: "work", workId: params.workId, taskId: params.taskId, session, bridgeId: executionId, discussionId, inputAfterSeq,
+      instruction: params.instruction.trim(), membershipRevision: membership.revision, triggerEventId: sourceEventId,
+      catalogRevision: catalog.revision, catalog: catalog.entries, requestedBy
     });
+    this.submittedWork.set(executionId, submitted);
+    // start failures are observed by completed; callers may still await started for an RPC error.
+    void submitted.started?.catch(() => undefined);
+    void submitted.completed.then(() => { this.submittedWork.delete(executionId); });
     this.emit(HostEvents.agentUpdated, { agent: await this.viewFor(this.store.requireAgent(params.agentId)) });
-    await submitted.started;
-    return { ok: true, runId: submitted.runId, queued: submitted.state === "queued" };
+    return submitted;
   }
 
   async addWorkCatalogEntry(params: WorkCatalogAddParams): Promise<WorkCatalog> {
@@ -792,20 +885,26 @@ export class HostRuntime implements Partial<DelegateHost> {
   private launch(
     id: string,
     context: RunContext
-  ): { runId: string; state: "started" | "queued"; started?: Promise<void> } {
+  ): SubmittedRun {
+    const roots = this.toolRoots(this.store.requireAgent(id), context);
     const submitted = this.scheduler.submit({
+      projectRoot: roots.project,
       agentId: id,
       context,
       start: async (activeRunId) => {
         const activeContext = this.scheduler.contextFor(activeRunId);
         if (!activeContext) throw new Error(`Run ${activeRunId} lost its context before start`);
+        try {
         const record = this.store.requireAgent(id);
         const model = resolveSessionModel({
           sessionModel: record.settings.model,
           defaultModel: this.settings.defaultModel,
           secrets: this.store.secrets
         });
-        let { events: replayed, compact } = await this.readModelTranscript(id);
+        precheck({ exists: true, busy: false, model, secrets: this.store.secrets });
+        if (!this.kernel) throw new RpcError(HostErrorCode.KERNEL_DOWN, "Kernel is not available");
+        if (activeContext.kind === "work") await this.prepareWorkInput(id, activeContext, activeRunId);
+        let { events: replayed, compact } = await this.readModelTranscript(id, activeContext);
         let prompt = await this.buildSystemPrompt(id, Boolean(compact), activeContext);
         let assembled = assembleContext({
           transcript: replayed,
@@ -816,7 +915,7 @@ export class HostRuntime implements Partial<DelegateHost> {
           try {
             const compacted = await this.compact(id, activeRunId, replayed, model);
             if (compacted) {
-              ({ events: replayed, compact } = await this.readModelTranscript(id));
+              ({ events: replayed, compact } = await this.readModelTranscript(id, activeContext));
               prompt = await this.buildSystemPrompt(id, Boolean(compact), activeContext);
               assembled = assembleContext({
                 transcript: replayed,
@@ -824,17 +923,18 @@ export class HostRuntime implements Partial<DelegateHost> {
                 notices: prompt.notices
               });
             }
-          } catch {
-            // 压缩是容量优化，不是用户回合的前置条件；失败时带原上下文继续，
-            // 下次达到阈值会再试。
+          } catch (error) {
+            throw new Error(`Context compaction failed: ${String(error)}`);
           }
+          if (estimateContextTokens(assembled) > this.contextWindow(model) * 0.75) throw new Error("Context capacity exhausted; narrow the input before continuing.");
         }
-        const approvals = await this.store.readApprovals(id);
+        const approvals = activeContext.kind === "work" && activeContext.session ? { always: [], refused: [] } : await this.store.readApprovals(id);
         await this.kernel!.start({
           runId: activeRunId,
+          ...(this.kernel!.provideContext ? { contextWindow: this.contextWindow(model) } : {}),
           messages: assembled,
           model,
-          roots: this.toolRoots(record, activeContext),
+          roots,
           toolPermission: record.settings.workspace?.toolPermission ?? this.settings.defaultToolPermission,
           approvals: approvals.always,
           refused: approvals.refused,
@@ -857,13 +957,21 @@ export class HostRuntime implements Partial<DelegateHost> {
           ),
           // turn 循环的静默提醒按「发声工具」计数：direct 是 SendMessage，
           // work 里对用户的可见出口是共享频道的 PostToWork / HandoffTask。
-          voiceToolNames: activeContext.kind === "work"
-            ? [DelegatedToolNames.postToWork, DelegatedToolNames.handoffTask]
-            : [DelegatedToolNames.sendMessage],
+          voiceToolNames: [DelegatedToolNames.sendMessage],
           secrets: this.store.secrets
         });
+        } catch (error) {
+          if (activeContext.kind === "work" && activeContext.bridgeId) await this.finishWorkDispatch(id, activeContext, "failed", error instanceof Error ? error.message : String(error));
+          this.emit(HostEvents.agentError, { agentId: id, runId: activeRunId, message: error instanceof Error ? error.message : String(error) });
+          throw error;
+        }
       }
     });
+    this.background(submitted.completed.then(async status => {
+      if (status !== "failed" || this.disposing) return;
+      const record = this.store.getAgent(id);
+      if (record) this.emit(HostEvents.agentUpdated, { agent: await this.viewFor(record) });
+    }));
     return submitted;
   }
 
@@ -871,7 +979,25 @@ export class HostRuntime implements Partial<DelegateHost> {
     // 只取消这个 agent 的 run，别的 agent 照跑。排着的唤醒一起丢 ——
     // 用户按下停止，意思是「别忙了」，不是「先停这个再接着忙下一个」。
     this.wakes.drop(id);
+    const activeRun = this.scheduler.activeRunFor(id);
+    if (activeRun) {
+      this.compactJobs.delete(activeRun);
+      await this.kernel?.cancelSummary?.(`${activeRun}:compact`);
+    }
+    const queued = this.scheduler.queuedForAgent(id);
+    for (const context of queued) {
+      if (context.kind === "work" && context.discussionId) await this.stopWorkDiscussion(context.workId);
+      if (context.kind === "work" && context.bridgeId) await this.finishWorkDispatch(id, context, "cancelled");
+    }
     for (const runId of this.scheduler.cancelAgent(id)) {
+      const context = this.scheduler.contextFor(runId);
+      if (context?.kind === "work") {
+        if (context.bridgeId) {
+          this.cancelledExecutions.add(context.bridgeId);
+          await this.finishWorkDispatch(id, context, "cancelled");
+        }
+        if (context.discussionId) await this.stopWorkDiscussion(context.workId);
+      }
       await this.kernel?.cancel(runId);
     }
     return { ok: true };
@@ -879,7 +1005,7 @@ export class HostRuntime implements Partial<DelegateHost> {
 
   async decide(id: string, toolCallId: string, resolution: ToolResolution): Promise<{ ok: true }> {
     const pending = this.pendingTools.get(pendingKey(id, toolCallId));
-    if (pending && resolution !== "once") {
+    if (pending && resolution !== "once" && !this.cardSessionFor(id)) {
       const stored = await this.store.readApprovals(id);
       const always = stored.always.filter((item) => !sameApproval(item, pending));
       const refused = stored.refused.filter((item) => !sameApproval(item, pending));
@@ -887,7 +1013,7 @@ export class HostRuntime implements Partial<DelegateHost> {
       if (resolution === "deny" || resolution === "never") refused.push(pending);
       await this.store.writeApprovals(id, { always, refused });
     }
-    if (resolution === "never") {
+    if (resolution === "never" && !this.cardSessionFor(id)) {
       const record = this.store.requireAgent(id);
       const updated = await this.store.updateAgent(id, {
         settings: {
@@ -936,12 +1062,55 @@ export class HostRuntime implements Partial<DelegateHost> {
       payload: params,
       createdAt: Date.now()
     });
-    this.emit(HostEvents.agentMessageCompleted, { agentId, event });
+    if (!this.cardSessionFor(agentId)) this.emit(HostEvents.agentMessageCompleted, { agentId, event });
     if (params.type === "text") return `Delivered. (id: ${event.id})`;
     if (params.type === "attachment") return `Delivered ${params.path}. (id: ${event.id})`;
     if (typeof params.widget === "string") return `Delivered the ${params.widget} widget.`;
     // 提问卡片语义上结束回合：用户的选择会作为下一条用户消息回来。
     return `Question delivered. (id: ${event.id}) Stop after this; the user's selection arrives as their next message.`;
+  }
+
+  async createTaskFromModel(agentId: string, params: CreateTaskParams, context: DelegatedToolContext): Promise<string> {
+    const run = requireWorkRun(context.runContext);
+    this.assertWorkAgent(agentId, run.workId);
+    const task = await this.createWorkTask({ ...params, workId: run.workId, priority: "normal", dependencyIds: [] }, { kind: "agent", id: agentId }, `${run.session?.id ?? agentId}:${context.assistantId}:${context.toolCallId}`);
+    return JSON.stringify(task);
+  }
+
+  async claimTask(agentId: string, params: ClaimTaskParams, context: DelegatedToolContext): Promise<string> {
+    const run = requireWorkRun(context.runContext);
+    this.assertWorkAgent(agentId, run.workId);
+    const key = `${run.session?.id ?? agentId}:${context.assistantId}:${context.toolCallId}`;
+    const prior = (await this.workStore.readTimeline(run.workId)).find((event) => event.clientEventId === key);
+    if (prior) return "Task already claimed by this command.";
+    const task = await this.requireWorkTask(run.workId, params.taskId);
+    if (!["ready", "proposed"].includes(task.state) || (task.ownerAgentId !== agentId && task.assigneeIds.length && !task.assigneeIds.includes(agentId))) throw new RpcError(HostErrorCode.WORK_FORBIDDEN, "This task cannot be claimed or resumed by you");
+    this.assertTaskRevision(task, params.expectedRevision);
+    const event = await this.workStore.appendEvent(run.workId, {
+      type: "task.claimed", id: crypto.randomUUID(), workId: run.workId, createdAt: Date.now(), actor: { kind: "agent", id: agentId }, clientEventId: key,
+      taskId: task.id, assigneeIds: task.assigneeIds.length ? task.assigneeIds : [agentId], revision: task.revision + 1,
+      messageId: crypto.randomUUID(), body: `Started: ${task.title}`, sourceSessionId: run.session?.id ?? `main:${agentId}`
+    }, { taskId: task.id, revision: task.revision });
+    this.emit(HostEvents.workEventAppended, { workId: run.workId, event });
+    return "Task claimed. Use DelegateWork with your own agent_id and this task_id to execute it in its independent card session.";
+  }
+
+  async readTask(agentId: string, params: ReadTaskParams, context: DelegatedToolContext): Promise<string> {
+    const run = requireWorkRun(context.runContext);
+    this.assertWorkAgent(agentId, run.workId);
+    return JSON.stringify(params.taskId ? await this.requireWorkTask(run.workId, params.taskId) : projectWork(await this.workStore.readTimeline(run.workId)).tasks.map(({ id, title, state, revision, assigneeIds, ownerAgentId }) => ({ id, title, state, revision, assigneeIds, ownerAgentId })));
+  }
+
+  async sendWorkMessage(agentId: string, params: WorkSendMessageParams, context: DelegatedToolContext): Promise<string> {
+    if (!params.cardAction) return this.postToWork(agentId, { message: params.content }, context);
+    const run = requireWorkRun(context.runContext);
+    const commandId = `${run.session?.id ?? agentId}:${context.assistantId}:${context.toolCallId}`;
+    const existing = (await this.workStore.readTimeline(run.workId)).find((event) => event.clientEventId === commandId);
+    if (existing) return `Delivered. (event: ${existing.id})`;
+    if (params.cardAction.expectedRevision !== undefined && (!run.taskId || (await this.requireWorkTask(run.workId, run.taskId)).revision !== params.cardAction.expectedRevision)) {
+      throw new RpcError(HostErrorCode.WORK_CONFLICT, "Task revision changed; read the current card before submitting");
+    }
+    return this.handoffTask(agentId, { summary: params.content, ...params.cardAction }, context);
   }
 
   async postToWork(
@@ -951,6 +1120,18 @@ export class HostRuntime implements Partial<DelegateHost> {
   ): Promise<string> {
     const run = requireWorkRun(context.runContext);
     this.assertWorkAgent(agentId, run.workId);
+    return this.inRoom(run.workId, async () => {
+    const history = await this.workStore.readTimeline(run.workId);
+    const commandId = `${run.session?.id ?? agentId}:${context.assistantId}:${context.toolCallId}`;
+    const prior = history.find(event => event.clientEventId === commandId);
+    if (prior?.type === "chat.posted") return `Posted to the Work shared room. (message: ${prior.messageId})`;
+    this.assertWorkRunCurrent(run, agentId);
+    const discussion = run.discussionId ? this.discussions.get(run.workId) : undefined;
+    if (run.discussionId) {
+      if (!discussion || discussion.id !== run.discussionId || discussion.stopped) throw new Error("Discussion stopped");
+      if (isPass(params.message)) return "No public message sent. Stop this turn.";
+      if (discussion.total >= discussionLimits.messages || (discussion.perExecution.get(run.bridgeId!) ?? 0) >= discussionLimits.perTurn) throw new Error("Discussion message budget reached. Stop this turn.");
+    }
     const event = await this.workStore.appendEvent(run.workId, {
       type: "chat.posted",
       id: crypto.randomUUID(),
@@ -958,12 +1139,22 @@ export class HostRuntime implements Partial<DelegateHost> {
       createdAt: Date.now(),
       actor: { kind: "agent", id: agentId },
       causationId: run.triggerEventId,
+      correlationId: run.discussionId,
+      clientEventId: `${run.session?.id ?? agentId}:${context.assistantId}:${context.toolCallId}`,
       messageId: crypto.randomUUID(),
       body: params.message.trim(),
+      sourceSessionId: run.session?.id ?? `main:${agentId}`,
+      taskId: run.taskId,
       mentionedAgentIds: []
     });
     this.emit(HostEvents.workEventAppended, { workId: run.workId, event });
-    return "Posted to the Work shared room.";
+    if (discussion && event.type === "chat.posted") {
+      discussion.total++;
+      discussion.perExecution.set(run.bridgeId!, (discussion.perExecution.get(run.bridgeId!) ?? 0) + 1);
+      discussion.replies.push(event);
+    }
+    return `Posted to the Work shared room. (message: ${event.type === "chat.posted" ? event.messageId : event.id})`;
+    });
   }
 
   async handoffTask(
@@ -974,11 +1165,20 @@ export class HostRuntime implements Partial<DelegateHost> {
     const run = requireWorkRun(context.runContext);
     if (!run.taskId) throw new RpcError(HostErrorCode.WORK_CONFLICT, "This Work run has no task to hand off");
     const record = this.assertWorkAgent(agentId, run.workId);
+    const history = await this.workStore.readTimeline(run.workId);
+    const commandId = `${run.session?.id ?? agentId}:${context.assistantId}:${context.toolCallId}`;
+    if (history.some(event => event.clientEventId === commandId && event.type === "task.handed_off")) return "Result already submitted. Stop this run.";
+    this.assertWorkRunCurrent(run, agentId);
+    if (run.bridgeId) {
+      const source = history.find(event => event.id === run.triggerEventId);
+      if (!source || !currentCardSource(history, source, run.taskId)) throw new Error("Card execution was superseded by a newer decision");
+    }
     const task = await this.requireWorkTask(run.workId, run.taskId);
-    if (!task.assigneeIds.includes(agentId)) {
+    if (task.ownerAgentId !== agentId && !task.assigneeIds.includes(agentId)) {
       throw new RpcError(HostErrorCode.WORK_FORBIDDEN, "This task is not assigned to you");
     }
-    const role = record.settings.workMembership!.binding!.role;
+    const role = this.workStore.membership(run.workId, agentId).binding!.role;
+    if (params.status === "done") throw new RpcError(HostErrorCode.WORK_FORBIDDEN, "Final acceptance belongs to the human reviewer");
     assertTaskTransition(task.state, params.status, role);
     if (params.status === "blocked" && !params.blocker_reason?.trim()) {
       throw new RpcError(HostErrorCode.WORK_CONFLICT, "blocker_reason is required when status is blocked");
@@ -998,30 +1198,20 @@ export class HostRuntime implements Partial<DelegateHost> {
       createdAt: now,
       actor: { kind: "agent", id: agentId },
       causationId: run.triggerEventId,
+      clientEventId: `${run.session?.id ?? agentId}:${context.assistantId}:${context.toolCallId}`,
       taskId: task.id,
       summary: params.summary.trim(),
       deliverables,
-      nextStatus: params.status,
+      nextStatus: params.status === "review" && task.ownerAgentId && task.ownerAgentId !== agentId ? "in_progress" : params.status,
+      ...(params.status === "review" && task.ownerAgentId && task.ownerAgentId !== agentId ? { returnToAgentId: task.ownerAgentId } : {}),
       ...(params.blocker_reason ? { blockerReason: params.blocker_reason.trim() } : {}),
-      revision: task.revision + 1
-    });
-    const message = await this.workStore.appendEvent(run.workId, {
-      type: "chat.posted",
-      id: crypto.randomUUID(),
-      workId: run.workId,
-      createdAt: now,
-      actor: { kind: "agent", id: agentId },
-      causationId: handoff.id,
+      revision: task.revision + 1,
       messageId: crypto.randomUUID(),
-      body: params.status === "blocked"
-        ? `${params.summary.trim()}\n\nBlocked: ${params.blocker_reason!.trim()}`
-        : params.summary.trim(),
-      mentionedAgentIds: []
-    });
+      sourceSessionId: run.session?.id ?? `main:${agentId}`
+    }, { taskId: task.id, revision: task.revision });
     this.emit(HostEvents.workEventAppended, { workId: run.workId, event: handoff });
-    this.emit(HostEvents.workEventAppended, { workId: run.workId, event: message });
-    if (params.status === "review") return "Handed off for review.";
-    if (params.status === "done") return "Marked done as Work coordinator.";
+    this.background(this.deliverCardEvent(handoff));
+    if (params.status === "review") return task.ownerAgentId && task.ownerAgentId !== agentId ? "Result returned to the card owner. Stop this run." : "Handed off for review. Stop this run.";
     return "Reported blocked.";
   }
 
@@ -1032,7 +1222,7 @@ export class HostRuntime implements Partial<DelegateHost> {
   ): Promise<string> {
     const run = requireWorkRun(context.runContext);
     this.assertWorkAgent(agentId, run.workId);
-    const events = (await this.workStore.readTimeline(run.workId)).slice(-params.limit);
+    const events = (await this.workStore.readTimeline(run.workId)).filter((event) => (params.beforeSeq === undefined || event.seq < params.beforeSeq) && (params.afterSeq === undefined || event.seq > params.afterSeq)).slice(-params.limit);
     return events.length ? events.map(renderWorkEventForAgent).join("\n") : "The Work timeline is empty.";
   }
 
@@ -1067,16 +1257,18 @@ export class HostRuntime implements Partial<DelegateHost> {
   ): Promise<string> {
     const run = requireWorkRun(context.runContext);
     const caller = this.assertWorkAgent(agentId, run.workId);
-    if (!caller.settings.workMembership!.binding!.grants.canAssignTasks) {
-      throw new RpcError(HostErrorCode.WORK_FORBIDDEN, "Only a Work coordinator can delegate to another Agent");
+    if (!this.workStore.membership(run.workId, agentId).binding!.grants.canAssignTasks) {
+      throw new RpcError(HostErrorCode.WORK_FORBIDDEN, "This room membership cannot dispatch tasks");
     }
-    await this.dispatchWorkFrom({
+    const taskId = params.task_id ?? run.taskId;
+    if (!taskId) throw new RpcError(HostErrorCode.WORK_CONFLICT, "DelegateWork requires a card. For room discussion, mention the member in SendMessage; the bounded discussion will schedule them.");
+    await this.delegateCard({
       workId: run.workId,
       agentId: params.agent_id,
-      ...(params.task_id ? { taskId: params.task_id } : {}),
+      taskId,
       instruction: params.instruction
-    }, { kind: "agent", id: agentId });
-    return "Delegated inside this Work.";
+    }, { kind: "agent", id: agentId }, `${run.session?.id ?? agentId}:${context.assistantId}:${context.toolCallId}`);
+    return "Worker dispatched. The card owner is unchanged; the worker result will return to the owner’s card session. Stop and wait if you have no independent work.";
   }
 
   /**
@@ -1102,7 +1294,7 @@ export class HostRuntime implements Partial<DelegateHost> {
         patch,
         createdAt: Date.now()
       });
-      this.emit(HostEvents.agentMessageCompleted, { agentId, event });
+      if (!this.cardSessionFor(agentId)) this.emit(HostEvents.agentMessageCompleted, { agentId, event });
       this.emit(HostEvents.agentUpdated, { agent: await this.viewFor(record) });
       return `Profile updated. You are now "${record.profile.name}".`;
     }
@@ -1326,6 +1518,19 @@ export class HostRuntime implements Partial<DelegateHost> {
     runContext: RunContext = DIRECT_RUN_CONTEXT
   ): Promise<{ text: string; notices: string[] }> {
     const record = this.store.requireAgent(id);
+    if (runContext.kind === "work" && runContext.session) {
+      return {
+        text: [
+          `You are ${record.profile.name} (${id}), working in your own card session.`,
+          `Persona: ${record.profile.description}`,
+          "This is the same Nunu identity, with a separate task history. Private conversation and memory are not available here.",
+          "Use SendMessage for team-visible progress; include cardAction for delivery or blockers. Plain text is private scratch space.",
+          "Only use the capabilities explicitly provided in this run. Do not read private agent state.",
+          await this.renderWorkPrompt(runContext)
+        ].join("\n\n"),
+        notices: []
+      };
+    }
     const expert = this.options.expert?.resolve(id);
     if (expert) return { text: expert.systemPrompt, notices: [] };
 
@@ -1365,13 +1570,13 @@ export class HostRuntime implements Partial<DelegateHost> {
         communication: [
           "## Talking in this Work",
           "",
-          "PostToWork is your only voice in this Work: the shared room is where the user and teammates read your progress, and a message counts only once it is inside PostToWork. Plain text you write stays invisible.",
-          "- Open with a short acknowledgement when a task arrives, then keep the room posted on meaningful beats — a step finished, a real result, a decision, a blocker, a change of plan. Never vanish into a long silent stretch, and do not narrate routine mechanics, retries, or minor snags.",
+          "SendMessage is your only voice in this Work: the shared room is where the user and teammates read your progress, and a message counts only once it is inside SendMessage. Plain text you write stays invisible.",
+          "- Acknowledgement is optional; silence is allowed when there is nothing new. Keep the room posted on meaningful beats — a step finished, a real result, a decision, a blocker, a change of plan. Never vanish into a long silent stretch, and do not narrate routine mechanics, retries, or minor snags.",
           "- Keep updates short and specific to what changed; fold trivial mechanics under one intent.",
-          "- Keep each message short and conversational — like quick texts in a busy room, not a status report. When an update has two or three beats, send them as a short run of two to four separate PostToWork calls instead of one welded paragraph.",
+          "- Keep each message short and conversational — like quick texts in a busy room, not a status report. When an update has two or three beats, send them as a short run of two to four separate SendMessage calls instead of one welded paragraph.",
           "- If nothing new has happened since your last update, say nothing until there is; an update the room doesn't need is noise everyone pays for.",
-          "- HandoffTask is the only way to return an assigned task for review, report it blocked, or mark it done. An update is not a handoff.",
-          "Your private Agent chat remains separate. SendMessage is unavailable in this run; do not move Work updates into the private transcript."
+          "- SendMessage with cardAction is the only way to submit an assigned task for review or report it blocked. Final acceptance belongs to the human reviewer. An update is not a handoff.",
+          "Your private Agent chat remains separate. SendMessage routes to this room in this run, never to the private chat."
         ].join("\n")
       } : {}),
       agentDirectory: renderAgentDirectory(
@@ -1379,7 +1584,7 @@ export class HostRuntime implements Partial<DelegateHost> {
         this.store
           .listAgents()
           .filter((mate) => mate.profile.id !== id && !mate.settings.hiddenFromSidebar)
-          .filter((mate) => runContext.kind !== "work" || mate.settings.workMembership?.binding?.workId === runContext.workId)
+          .filter((mate) => runContext.kind !== "work" || Boolean(this.workStore.membership(runContext.workId, mate.profile.id).binding))
           // 按 createdAt 排序，让这一段在队友集合不变时逐字节相同。
           .sort((a, b) => a.profile.createdAt - b.profile.createdAt)
           .map((mate) => ({
@@ -1423,8 +1628,8 @@ export class HostRuntime implements Partial<DelegateHost> {
     const work = this.workStore.getWork(context.workId);
     const task = context.taskId ? await this.requireWorkTask(context.workId, context.taskId) : null;
     const members = this.store.listAgents()
-      .filter((record) => record.settings.workMembership?.binding?.workId === context.workId)
-      .map((record) => `${record.profile.name} (${record.profile.id}) — ${record.settings.workMembership!.binding!.role}`);
+      .filter((record) => Boolean(this.workStore.membership(context.workId, record.profile.id).binding))
+      .map((record) => `${record.profile.name} (${record.profile.id}) — ${this.workStore.membership(context.workId, record.profile.id).binding!.role}`);
     const capabilityLines: string[] = [];
     for (const entry of context.catalog.filter((candidate) => candidate.enabled)) {
       if (entry.kind === "skill") {
@@ -1455,6 +1660,8 @@ export class HostRuntime implements Partial<DelegateHost> {
         "",
         "### Assigned task",
         `Task id: ${task.id}`,
+        `Permanent owner: ${task.ownerAgentId ?? "human-created card"}. Workers: ${task.assigneeIds.join(", ") || "none"}.`,
+        "DelegateWork assigns workers without changing the owner. Worker SendMessage cardAction review returns results to the owner; owner review requests human acceptance. A blocked report pauses the card until a human confirms resume. Stop after reporting review or blocked.",
         `Title: ${task.title}`,
         `Description: ${task.description || "(not specified)"}`,
         `State: ${task.state}`,
@@ -1514,14 +1721,14 @@ export class HostRuntime implements Partial<DelegateHost> {
     this.workStore.requireWork(workId);
     for (const agentId of agentIds) {
       const record = this.store.requireAgent(agentId);
-      if (record.settings.workMembership?.binding?.workId === workId) continue;
+      if (Boolean(this.workStore.membership(workId, agentId).binding)) continue;
       throw new RpcError(HostErrorCode.WORK_CONFLICT, `Agent ${agentId} is not a member of this Work`);
     }
   }
 
   private assertWorkAgent(agentId: string, workId: string): AgentRecord {
     const record = this.store.requireAgent(agentId);
-    if (record.settings.workMembership?.binding?.workId !== workId) {
+    if (!this.workStore.membership(workId, agentId).binding) {
       throw new RpcError(HostErrorCode.WORK_FORBIDDEN, "Agent is no longer a member of this Work");
     }
     return record;
@@ -1534,9 +1741,10 @@ export class HostRuntime implements Partial<DelegateHost> {
       project: context.kind === "work"
         ? this.workStore.getWork(context.workId).projectRoot
         : record.settings.workspace?.projectRoot ?? null,
-      scratch: this.store.scratchDir(record.profile.id),
-      terminals: path.join(this.store.agentDir(record.profile.id), "terminals"),
+      scratch: context.kind === "work" && context.session ? path.join(this.sessions.directory(context.session), "scratch") : this.store.scratchDir(record.profile.id),
+      terminals: path.join(context.kind === "work" && context.session ? this.sessions.directory(context.session) : this.store.agentDir(record.profile.id), "terminals"),
       denied: [
+        ...(context.kind === "work" && context.session ? [path.join(this.options.dataDir, "agents")] : []),
         path.join(dataParent, "secrets.bin"),
         path.join(this.options.dataDir, "host-secrets.json"),
         path.join(this.options.dataDir, "credentials.json"),
@@ -1550,36 +1758,53 @@ export class HostRuntime implements Partial<DelegateHost> {
     };
   }
 
-  private async compact(
-    agentId: string,
-    runId: string,
-    transcript: TranscriptEvent[],
-    model: AgentSettings["model"]
-  ): Promise<boolean> {
-    if (!this.kernel) return false;
-    const partition = partitionForCompaction(transcript);
-    if (!partition) return false;
-    const { text } = await this.kernel.summarize({
-      runId: `${runId}:compact`,
+  private readonly compactJobs = new Map<string, {
+    epoch: number; throughSeq: number; tailFromSeq: number; ready: boolean;
+    result: Promise<string>; activeRequest?: string; session?: import("./session-store.js").CardSession;
+  }>();
+
+  private prepareCompact(agentId: string, runId: string, transcript: TranscriptEvent[], model: AgentSettings["model"], withinTurn = false) {
+    const existing = this.compactJobs.get(runId);
+    if (existing) return existing;
+    const partition = partitionForCompaction(transcript, withinTurn);
+    if (!partition || !this.kernel) return undefined;
+    const session = this.cardSessionFor(agentId);
+    const request = transcript.findLast(event => event.type === "user" || event.type === "wake");
+    const activeRequest = request && "text" in request ? request.text : transcript.findLast(event => event.type === "compact")?.activeRequest;
+    const job = { activeRequest: withinTurn ? activeRequest : undefined, epoch: transcript.findLast(event => event.type === "compact")?.epoch ?? 0,
+      throughSeq: partition.throughSeq, tailFromSeq: partition.tailFromSeq, ready: false, session,
+      result: Promise.resolve("") };
+    const kernel = this.kernel;
+    this.compactJobs.set(runId, job);
+    const deadline = Date.now() + 120_000;
+    job.result = summarizePrefix(kernel, {
+      runId: `${runId}:compact`, messages: partition.messagesToSummarize, model, secrets: this.store.secrets,
       systemPrompt: COMPACTION_PROMPT,
-      messages: partition.messagesToSummarize,
-      model,
-      secrets: this.store.secrets
+      current: () => !this.disposing && Date.now() < deadline && this.compactJobs.get(runId) === job && !!this.scheduler.contextFor(runId)
     });
-    const summary = text.trim();
-    if (!summary) return false;
-    const nextEpoch = (await this.store.readPromptCache(agentId)).epoch + 1;
-    await this.store.appendEvent(agentId, {
-      type: "compact",
-      id: crypto.randomUUID(),
-      createdAt: Date.now(),
-      epoch: nextEpoch,
-      throughSeq: partition.throughSeq,
-      tailFromSeq: partition.tailFromSeq,
-      summary
-    });
-    await this.store.bumpPromptEpoch(agentId);
-    return true;
+    void job.result.then(() => { job.ready = true; }, () => { job.ready = true; });
+    this.compactJobs.set(runId, job);
+    return job;
+  }
+
+  private async compact(agentId: string, runId: string, transcript: TranscriptEvent[], model: AgentSettings["model"], withinTurn = false): Promise<boolean> {
+    const job = this.prepareCompact(agentId, runId, transcript, model, withinTurn);
+    if (!job) return false;
+    try {
+      const summary = await job.result;
+      const context = this.scheduler.contextFor(runId);
+      if (this.compactJobs.get(runId) !== job || !context || this.disposing || (context.kind === "work" && context.bridgeId && this.cancelledExecutions.has(context.bridgeId))) return false;
+      const current = await this.readModelTranscript(agentId, context);
+      if ((current.compact?.epoch ?? 0) !== job.epoch) return false;
+      const record = { type: "compact" as const, id: crypto.randomUUID(), createdAt: Date.now(), epoch: job.epoch + 1,
+        throughSeq: job.throughSeq, tailFromSeq: job.tailFromSeq, summary, activeRequest: job.activeRequest };
+      // The captured session and prefix are immutable; later events remain in the preserved tail.
+      if (job.session) await this.sessions.append(job.session, record);
+      else { await this.store.appendEvent(agentId, record); await this.store.bumpPromptEpoch(agentId); }
+      return true;
+    } finally {
+      if (this.compactJobs.get(runId) === job) this.compactJobs.delete(runId);
+    }
   }
 
   /**
@@ -1622,12 +1847,40 @@ export class HostRuntime implements Partial<DelegateHost> {
     const agentId = this.scheduler.agentIdFor(runId);
     if (!agentId) return;
 
+    if (method === "turn.context") {
+      try {
+        await this.flushAssistant(agentId);
+        const context = this.scheduler.contextFor(runId)!;
+        const model = resolveSessionModel({ sessionModel: this.store.requireAgent(agentId).settings.model, defaultModel: this.settings.defaultModel, secrets: this.store.secrets });
+        const limit = this.contextWindow(model);
+        const used = Number(params.usedTokens);
+        let transcript = await this.readModelTranscript(agentId, context);
+        const startAt = Math.min(limit * 0.8, limit - Math.min(10_000, limit * 0.2));
+        const applyAt = Math.min(limit * 0.85, limit - Math.min(5_000, limit * 0.15));
+        if (used >= startAt) this.prepareCompact(agentId, runId, transcript.events, model, true);
+        const job = this.compactJobs.get(runId);
+        let messages;
+        if (job && (job.ready || used >= applyAt)) {
+          const applied = await this.compact(agentId, runId, transcript.events, model, true);
+          if (applied) {
+            transcript = await this.readModelTranscript(agentId, context);
+            const prompt = await this.buildSystemPrompt(agentId, true, context);
+            messages = assembleContext({ transcript: transcript.events, systemPrompt: prompt.text, notices: prompt.notices });
+          }
+        }
+        await this.kernel?.provideContext?.({ runId, requestId: String(params.requestId), messages });
+      } catch (error) {
+        await this.kernel?.provideContext?.({ runId, requestId: String(params.requestId), error: `Context compaction failed: ${String(error)}` });
+      }
+      return;
+    }
+
     if (method === "turn.delta") {
       const part = params.part === "thinking" ? "thinking" : "text";
       const current = this.openBuffer(agentId, String(params.messageId));
       current.parts = appendAssistantDelta(current.parts, part, String(params.delta ?? ""));
       this.buffers.set(agentId, current);
-      this.emit(HostEvents.agentMessageDelta, {
+      if (!this.cardSessionFor(agentId)) this.emit(HostEvents.agentMessageDelta, {
         agentId,
         runId,
         messageId: current.messageId,
@@ -1660,7 +1913,7 @@ export class HostRuntime implements Partial<DelegateHost> {
       // 否则下一轮会出现孤立 tool result。
       const assistantId = await this.recordToolCall(agentId, params);
       // 序号来自内存里的 lastSeq —— 不再为了算下一个序号而整文件重读。
-      const event = await this.store.appendEvent(agentId, {
+      const event = await this.appendRunEvent(agentId, {
         type: "tool",
         id: crypto.randomUUID(),
         assistantId,
@@ -1671,7 +1924,7 @@ export class HostRuntime implements Partial<DelegateHost> {
         createdAt: Date.now()
       });
       this.forgetPending(agentId, String(params.toolCallId));
-      this.emit(HostEvents.agentMessageCompleted, { agentId, event });
+      if (!this.cardSessionFor(agentId)) this.emit(HostEvents.agentMessageCompleted, { agentId, event });
       this.emit(HostEvents.agentToolCompleted, { ...params, agentId, runId });
       return;
     }
@@ -1681,19 +1934,24 @@ export class HostRuntime implements Partial<DelegateHost> {
       return;
     }
     if (method === "turn.ended") {
+      this.compactJobs.delete(runId);
+      await this.kernel?.cancelSummary?.(`${runId}:compact`);
       await this.flushAssistant(agentId);
       this.buffers.delete(agentId);
       this.recordedCalls.delete(agentId);
       this.callOrigins.delete(agentId);
       this.clearAgentPending(agentId);
+      const context = this.scheduler.contextFor(runId);
+      const runContext = context?.kind === "work" ? context : undefined;
       const status: "idle" | "error" | "cancelled" =
         params.status === "error" ? "error" : params.status === "cancelled" ? "cancelled" : "idle";
       // 先摘掉 run 再算派生运行态，否则 agentUpdated 里还会带着 running。
-      this.scheduler.settle(runId);
+      if (runContext?.bridgeId) await this.finishWorkDispatch(agentId, runContext, status === "idle" ? "completed" : status === "error" ? "failed" : "cancelled");
+      this.scheduler.settle(runId, status === "idle" ? "completed" : status === "error" ? "failed" : "cancelled");
       await this.mark(agentId, status);
       this.emit(HostEvents.agentEnded, { agentId, runId, status });
       this.wakes.closeRun(runId);
-      if (status === "idle") {
+      if (status === "idle" && !runContext?.session) {
         // 抽取失败不该影响这一轮 —— 它是后台工作，用户没在等它。
         this.background(this.extractMemory(agentId, runId));
       }
@@ -1790,6 +2048,7 @@ export class HostRuntime implements Partial<DelegateHost> {
       output = `${name} is not available in a ${runContext.kind} run.`;
     } else {
       try {
+        if (runContext.kind === "work") this.assertWorkRunCurrent(runContext, agentId);
         output = await tool.execute((params.arguments ?? {}) as Record<string, unknown>, {
           agentId,
           assistantId,
@@ -1801,21 +2060,30 @@ export class HostRuntime implements Partial<DelegateHost> {
         output = error instanceof Error ? error.message : String(error);
       }
     }
-    await this.kernel?.provideToolResult({ runId, toolCallId, ok, output });
+    const endTurn = ok && runContext?.kind === "work" && (
+      name === DelegatedToolNames.delegateWork ||
+      (name === DelegatedToolNames.sendMessage && !!params.arguments?.cardAction) ||
+      (runContext.discussionId !== undefined && name === DelegatedToolNames.sendMessage &&
+        (isPass(String(params.arguments?.content ?? "")) || (this.discussions.get(runContext.workId)?.perExecution.get(runContext.bridgeId!) ?? 0) >= discussionLimits.perTurn))
+    );
+    await this.kernel?.provideToolResult({ runId, toolCallId, ok, output, ...(endTurn ? { endTurn: true } : {}) });
   }
 
   // ── 派生视图 ────────────────────────────────────────────────────────────
 
-  private async viewFor(record: AgentRecord): Promise<AgentView> {
+  private async viewFor(record: AgentRecord, workId?: string): Promise<AgentView> {
     return {
       profile: record.profile,
-      settings: record.settings,
+      settings: { ...record.settings, workMembership: workId ? this.workStore.membership(workId, record.profile.id) : undefined },
+      roomMemberships: this.workStore.membershipsFor(record.profile.id),
       runtime: await this.runtimeFor(record.profile.id, record.lastActivityAt)
     };
   }
 
   private async runtimeFor(id: string, lastActivityAt: number): Promise<AgentRuntimeView> {
+    const activeRunId = this.scheduler.activeRunFor(id);
     return {
+      ...(activeRunId ? { activeRunId } : {}),
       status: this.scheduler.isBusy(id) ? "running" : this.errored.has(id) ? "error" : "idle",
       unread: await this.store.isUnread(id),
       lastActivityAt
@@ -1826,11 +2094,179 @@ export class HostRuntime implements Partial<DelegateHost> {
    * 只读模型活跃窗口。缺失的 tool result 由 assembleContext 纯投影修补，
    * 不追加回 JSONL：「推断为中断」不是真实发生的交互。
    */
-  private readModelTranscript(id: string): Promise<{
+  private readModelTranscript(id: string, context?: RunContext): Promise<{
     events: TranscriptEvent[];
     compact?: Extract<TranscriptEvent, { type: "compact" }>;
   }> {
-    return this.store.readForAssemble(id);
+    return context?.kind === "work" && context.session
+      ? this.sessions.readForAssemble(context.session)
+      : this.store.readForAssemble(id);
+  }
+
+  private assertWorkRunCurrent(context: Extract<RunContext, { kind: "work" }>, agentId: string) {
+    const membership = this.workStore.membership(context.workId, agentId);
+    if (!membership.binding?.grants.canPost || (context.membershipRevision !== undefined && membership.revision !== context.membershipRevision)) throw new Error("Room membership changed");
+    if (!context.bridgeId) return;
+    const submitted = this.submittedWork.get(context.bridgeId);
+    if (this.cancelledExecutions.has(context.bridgeId) || !submitted || !this.scheduler.contextFor(submitted.runId)) throw new Error("Work execution has stopped");
+  }
+
+  private async prepareWorkInput(agentId: string, context: Extract<RunContext, { kind: "work" }>, runId: string): Promise<void> {
+    if (!context.bridgeId) return;
+    this.assertWorkAgent(agentId, context.workId);
+    const roomEvents = await this.workStore.readTimeline(context.workId);
+    if (context.discussionId) {
+      const live = this.discussions.get(context.workId);
+      if (!live || live.id !== context.discussionId || live.stopped || live.superseded) throw new Error("Discussion stopped before this member started");
+      live.hasStarted = true;
+    }
+    if (this.cancelledExecutions.has(context.bridgeId) || this.disposing) throw new Error("Execution cancelled");
+    if (this.workStore.membership(context.workId, agentId).revision !== context.membershipRevision) throw new Error("Work membership changed before execution");
+    if (context.taskId) {
+      const task = await this.requireWorkTask(context.workId, context.taskId);
+      const source = roomEvents.find(event => event.id === context.triggerEventId);
+      if (!source || !currentCardSource(roomEvents, source, context.taskId) || (task.ownerAgentId !== agentId && !task.assigneeIds.includes(agentId)) || task.state !== "in_progress") {
+        throw new RpcError(HostErrorCode.WORK_CONFLICT, "Card is no longer assigned for execution; resume or reassign it before dispatching");
+      }
+    }
+    await this.appendWorkEvent(context.workId, {
+      type: "execution.started", id: `start:${context.bridgeId}`, clientEventId: `start:${context.bridgeId}`,
+      workId: context.workId, createdAt: Date.now(), actor: { kind: "system", id: "host" }, executionId: context.bridgeId,
+      sourceEventId: context.triggerEventId, agentId, taskId: context.taskId, sessionId: context.session?.id ?? `main:${agentId}`,
+      runId, membershipRevision: context.membershipRevision!
+    });
+    const existingInput = await this.readModelTranscript(agentId, context);
+    if (existingInput.events.some(event => event.id === context.bridgeId)) return;
+    const makeDraft = (events: TranscriptEvent[]): TranscriptDraft => {
+      let text = context.instruction ?? "Read the room and respond if you have something useful to add.";
+      let received;
+      if (!context.session) {
+        const source = roomEvents.find(event => event.id === context.triggerEventId);
+        const triggers = source?.type === "discussion.started" ? source.triggerEventIds : [context.triggerEventId];
+        const input = selectRoomInput(roomEvents, events, context.workId, context.membershipRevision!, triggers, context.inputAfterSeq);
+        received = { membershipRevision: context.membershipRevision!, fromSeq: input.fromSeq, throughSeq: input.throughSeq,
+          messageIds: input.messages.map(message => message.messageId), epoch: input.epoch, mode: input.mode };
+        text = [`Room ${context.workId}: ${input.mode === "background" ? "Recent historical background; older messages may be omitted. ReadWorkTimeline can retrieve them." : "New room messages since your previous input."}`,
+          ...input.messages.map(message => `[${message.seq} ${message.actor.kind}:${message.actor.id} message:${message.messageId}] ${message.body}`),
+          `Current trigger: ${text}`].join("\n\n");
+      }
+      return { type: "wake", id: context.bridgeId!, createdAt: Date.now(), hops: 0, text,
+        source: { kind: "work", workId: context.workId, workName: this.workStore.getWork(context.workId).name, bridgeId: context.bridgeId!, taskId: context.taskId, ...(received ? { roomInput: received } : {}) } };
+    };
+    // Check capacity before committing an input receipt. Compact only already received history.
+    const record = this.store.requireAgent(agentId);
+    const model = resolveSessionModel({ sessionModel: record.settings.model, defaultModel: this.settings.defaultModel, secrets: this.store.secrets });
+    let transcript = await this.readModelTranscript(agentId, context);
+    let draft = makeDraft(transcript.events);
+    let prompt = await this.buildSystemPrompt(agentId, Boolean(transcript.compact), context);
+    const size = () => estimateContextTokens(assembleContext({ transcript: [...transcript.events, { ...draft, seq: (transcript.events.at(-1)?.seq ?? 0) + 1 } as TranscriptEvent], systemPrompt: prompt.text, notices: prompt.notices }));
+    if (size() > this.contextWindow(model) * 0.75) {
+      try { await this.compact(agentId, runId, transcript.events, model); } catch { /* No receipt is committed if compaction cannot make room. */ }
+      transcript = await this.readModelTranscript(agentId, context);
+      draft = makeDraft(transcript.events);
+      prompt = await this.buildSystemPrompt(agentId, Boolean(transcript.compact), context);
+      if (size() > this.contextWindow(model) * 0.75) throw new Error("Room context is too large. No new room input was consumed; narrow the history range before continuing.");
+    }
+    const event = context.session ? await this.sessions.append(context.session, draft) : await this.store.appendEvent(agentId, draft);
+    if (!context.session) this.emit(HostEvents.agentMessageCompleted, { agentId, event });
+  }
+
+  private async finishWorkDispatch(agentId: string, context: Extract<RunContext, { kind: "work" }>, status: "completed" | "failed" | "cancelled", error?: string) {
+    return this.inRoom(context.workId, async () => {
+    const previous = (await this.workStore.readTimeline(context.workId)).find(event => event.type === "execution.finished" && event.executionId === context.bridgeId);
+    if (previous) return;
+    if (this.cancelledExecutions.has(context.bridgeId!)) status = "cancelled";
+    await this.appendWorkEvent(context.workId, {
+      type: "execution.finished", id: `finish:${context.bridgeId}`, clientEventId: `finish:${context.bridgeId}`,
+      workId: context.workId, createdAt: Date.now(), actor: { kind: "system", id: "host" },
+      executionId: context.bridgeId!, sourceEventId: context.triggerEventId, agentId, taskId: context.taskId, status, error
+    });
+    });
+  }
+
+  private workInterruptions(events: WorkEvent[]): WorkSnapshot["interruptions"] {
+    const result: WorkSnapshot["interruptions"] = [];
+    const resumed = new Set(events.filter(event => event.type === "work.requested").map(event => event.resumesExecutionId));
+    for (const event of events) {
+      if (event.type === "history.imported") {
+        const uncertain = events.filter(item => event.unconfirmedEventIds.includes(item.id));
+        if (uncertain.some(item => item.type === "chat.posted") && !events.some(item => item.clientEventId === `continue:${event.id}`)) result.push({ kind: "discussion", eventId: event.id, error: "Previous room history is preserved. Continue only if this discussion still needs a response." });
+        for (const source of uncertain) {
+          const task = "taskId" in source && source.taskId ? projectWork(events).tasks.find(task => task.id === source.taskId) : undefined;
+          const intent = workIntent(source, task);
+          if (intent && task?.state === "in_progress" && currentCardSource(events, source, task.id) && !resumed.has(source.id)) result.push({ kind: "execution", eventId: source.id, agentId: intent.agentId, taskId: intent.taskId, error: "Legacy execution requires confirmation before continuing." });
+        }
+      }
+      if (event.type === "discussion.started") {
+        const ended = events.find(item => item.type === "discussion.finished" && item.discussionId === event.id);
+        const continued = events.some(item => item.type === "chat.posted" && item.clientEventId === `continue:${event.id}`);
+        if (!continued && (!ended || (ended.type === "discussion.finished" && ended.status === "interrupted")) && this.discussions.get(event.workId)?.id !== event.id) result.push({ kind: "discussion", eventId: event.id, error: [...events].reverse().find((item): item is Extract<WorkEvent, { type: "execution.finished" }> => item.type === "execution.finished" && item.sourceEventId === event.id && item.status === "failed")?.error ?? (ended?.type === "discussion.finished" ? ended.error : undefined) ?? "Discussion interrupted. Continue starts a new bounded discussion." });
+      }
+      if (event.type === "execution.started" || event.type === "execution.finished") {
+        if (resumed.has(event.executionId) || this.submittedWork.has(event.executionId)) continue;
+        const source = events.find(item => item.id === event.sourceEventId);
+        if (source?.type === "discussion.started") continue;
+        const end = events.find(item => item.type === "execution.finished" && item.executionId === event.executionId);
+        if (event.type === "execution.started" && end) continue;
+        if (event.type === "execution.finished" && event.status !== "failed" && !(event.status === "completed" && event.taskId && source && currentCardSource(events, source, event.taskId))) continue;
+        if (source && event.taskId && !currentCardSource(events, source, event.taskId)) continue;
+        result.push({ kind: "execution", eventId: event.id, agentId: event.agentId, taskId: event.taskId, error: event.type === "execution.finished" ? event.error ?? (event.status === "completed" ? "Card execution ended without a handoff. Continue or cancel the card." : "Execution failed. Check the result before continuing.") : "Execution interrupted. Check tools and published results before continuing." });
+      }
+      if (event.type === "dispatch.requested" && !resumed.has(event.bridgeId) && !events.some(item => item.type === "chat.posted" && item.clientEventId === `continue:${event.id}`)) {
+        const end = events.find(item => item.type === "dispatch.finished" && item.bridgeId === event.bridgeId);
+        if (!end || (end.type === "dispatch.finished" && end.status === "failed")) result.push({ kind: "execution", eventId: event.id, agentId: event.agentId, taskId: event.taskId, error: "Legacy execution requires confirmation before continuing." });
+      }
+    }
+    return result;
+  }
+
+  async continueWork(workId: string, eventId: string, inputAfterSeq?: number): Promise<{ ok: true }> {
+    const events = await this.workStore.readTimeline(workId);
+    if (inputAfterSeq !== undefined && (!Number.isSafeInteger(inputAfterSeq) || inputAfterSeq < 0 || inputAfterSeq > (events.at(-1)?.seq ?? 0))) throw new Error("Invalid room history start sequence");
+    const event = events.find(item => item.id === eventId);
+    if (!event || !this.workInterruptions(events).some(item => item.eventId === eventId)) throw new Error("This work no longer needs continuation");
+    if (event.type === "history.imported" || event.type === "discussion.started" || (event.type === "dispatch.requested" && event.discussion)) {
+      if (event.type === "discussion.started" && !events.some(item => item.type === "discussion.finished" && item.discussionId === event.id)) await this.endDiscussion(workId, event.id, "interrupted");
+
+      await this.postWorkMessage({ workId, body: "Continue the interrupted discussion, using the existing room history.", mentionedAgentIds: [], inputAfterSeq, clientEventId: `continue:${eventId}` });
+      return { ok: true };
+    }
+    const source = event.type === "execution.started" || event.type === "execution.finished" ? events.find(item => item.id === event.sourceEventId) : event;
+    if (!source) throw new Error("Missing work source");
+    const task = "taskId" in source && source.taskId ? await this.requireWorkTask(workId, source.taskId) : undefined;
+    const intent = workIntent(source, task);
+    if (!intent || (task && task.state !== "in_progress")) throw new Error("Resume the card state before continuing execution");
+    await this.inRoom(workId, async () => {
+      const request = await this.appendWorkEvent(workId, {
+        type: "work.requested", id: crypto.randomUUID(), clientEventId: `continue:${eventId}`, workId, createdAt: Date.now(), actor: { kind: "user", id: "local-user" }, ...intent, inputAfterSeq,
+        membershipRevision: this.workStore.membership(workId, intent.agentId).revision,
+        resumesExecutionId: event.type === "dispatch.requested" ? event.bridgeId : "executionId" in event ? event.executionId : event.id
+      });
+      await this.deliverCardEventNow(request);
+    });
+    return { ok: true };
+  }
+
+  private async replayWorkDispatches(): Promise<void> {
+    for (const work of this.workStore.listWorks()) {
+      const events = await this.workStore.readTimeline(work.id);
+      const handled = new Set(events.flatMap(event => event.type === "history.imported" ? event.unconfirmedEventIds : event.type === "discussion.started" ? event.triggerEventIds : event.type === "dispatch.requested" && event.discussion ? [event.discussion.rootId] : []));
+      for (const event of events) {
+        if (event.type === "chat.posted" && event.actor.kind === "user" && !handled.has(event.id)) this.enqueueDiscussion(event);
+        if (["task.delegated", "task.handed_off", "task.transitioned", "work.requested"].includes(event.type)) await this.deliverCardEvent(event);
+      }
+    }
+  }
+
+  private cardSessionFor(agentId: string) {
+    const runId = this.scheduler.activeRunFor(agentId);
+    const context = runId ? this.scheduler.contextFor(runId) : undefined;
+    return context?.kind === "work" ? context.session : undefined;
+  }
+
+  private appendRunEvent(agentId: string, draft: TranscriptDraft) {
+    const session = this.cardSessionFor(agentId);
+    return session ? this.sessions.append(session, draft) : this.store.appendEvent(agentId, draft);
   }
 
   private agentHasPending(id: string): boolean {
@@ -1904,6 +2340,7 @@ export class HostRuntime implements Partial<DelegateHost> {
   }
 
   private liveFor(id: string) {
+    if (this.cardSessionFor(id)) return null;
     const buffer = this.buffers.get(id);
     if (!buffer || buffer.flushed) return null;
     return { messageId: buffer.messageId, parts: buffer.parts };
@@ -1913,13 +2350,13 @@ export class HostRuntime implements Partial<DelegateHost> {
     const buffer = this.buffers.get(agentId);
     if (!buffer || buffer.flushed) return;
     buffer.flushed = true;
-    const event = await this.store.appendEvent(agentId, {
+    const event = await this.appendRunEvent(agentId, {
       type: "assistant",
       id: buffer.messageId,
       parts: buffer.parts,
       createdAt: Date.now()
     });
-    this.emit(HostEvents.agentMessageCompleted, { agentId, event });
+    if (!this.cardSessionFor(agentId)) this.emit(HostEvents.agentMessageCompleted, { agentId, event });
   }
 
   private async mark(id: string, status: "idle" | "error" | "cancelled"): Promise<void> {
@@ -1970,6 +2407,8 @@ function requireWorkRun(context: RunContext): Extract<RunContext, { kind: "work"
 function renderWorkEventForAgent(event: WorkEvent): string {
   if (event.type === "chat.posted") return `[${event.actor.kind}:${event.actor.id}] ${event.body}`;
   if (event.type === "task.created") return `[task] Created ${event.task.id}: ${event.task.title}`;
+  if (event.type === "task.delegated") return `[task] ${event.taskId} worker ${event.agentId}: ${event.instruction}`;
+  if (event.type === "task.claimed") return `[task] ${event.taskId}: ${event.body}`;
   if (event.type === "task.assigned") return `[task] ${event.taskId} assigned to ${event.assigneeIds.join(", ") || "nobody"}`;
   if (event.type === "task.transitioned") return `[task] ${event.taskId}: ${event.from} -> ${event.to}`;
   if (event.type === "task.progressed") return `[task] ${event.taskId}: ${event.summary}`;
@@ -1977,7 +2416,7 @@ function renderWorkEventForAgent(event: WorkEvent): string {
   if (event.type === "dispatch.requested") return `[dispatch] ${event.agentId}: ${event.instruction}`;
   if (event.type === "member.attached") return `[member] ${event.agentId} joined as ${event.role}`;
   if (event.type === "member.detached") return `[member] ${event.agentId} left`;
-  return `[dispatch] ${event.agentId} acknowledged`;
+  return `[${event.type}] ${"agentId" in event ? event.agentId : event.actor.id}`;
 }
 
 /**

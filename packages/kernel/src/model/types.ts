@@ -5,6 +5,7 @@ export interface NormalizedChatRequest {
   messages: ChatMessage[];
   tools: ToolDefinition[];
   apiKey: string;
+  maxOutputTokens?: number;
 }
 
 export type NormalizedChunk =

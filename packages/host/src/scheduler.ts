@@ -1,23 +1,30 @@
 /**
- * Run 的调度。`runId` 只活在内存里 —— 它是「这次唤醒」的生命周期标识，重启后
- * 没有意义；运行态落盘会重新制造第二把主键。
+ * Run 的调度。`runId` 标识一次进程内执行；持久记录可以引用它作为执行证据，
+ * 但重启后不能用旧 runId 恢复程序位置。
  *
  * 两条约束：全局同时最多 `maxConcurrent` 个 run；同一个 agent 同时只有一个 run，
- * 因为一个 agent 只有一条 transcript，并行跑会把上下文写乱。
+ * 多个 session 共享同一持久身份与执行资源，必须串行调度。
  */
 
+import path from "node:path";
+import { realpathSync } from "node:fs";
 import { freezeRunContext, type RunContext } from "./run-context.js";
 
 export interface RunRequest {
   agentId: string;
   context: RunContext;
+  projectRoot?: string | null;
   /** 真正拉起 Kernel 的动作。抛错视为该 run 立即收束。 */
   start(runId: string): Promise<void>;
 }
 
 interface ScheduledRun extends RunRequest {
   runId: string;
+  complete(status: RunOutcome): void;
 }
+
+export type RunOutcome = "completed" | "failed" | "cancelled";
+export interface SubmittedRun { runId: string; state: "started" | "queued"; started?: Promise<void>; completed: Promise<RunOutcome> }
 
 export const DEFAULT_MAX_CONCURRENT_RUNS = 3;
 
@@ -35,22 +42,28 @@ export class AgentScheduler {
    * 才能把「Kernel 根本没拉起来」这种失败当场回给用户，而不是静悄悄地挂着。
    * 排队的没有这个 promise：它什么时候起还不知道。
    */
-  submit(request: RunRequest): { runId: string; state: "started" | "queued"; started?: Promise<void> } {
+  submit(request: RunRequest): SubmittedRun {
+    let complete!: (status: RunOutcome) => void;
+    const completed = new Promise<RunOutcome>(resolve => { complete = resolve; });
     const run: ScheduledRun = {
       ...request,
+      complete,
+      projectRoot: request.projectRoot ? canonicalRoot(request.projectRoot) : null,
       context: freezeRunContext(request.context),
       runId: this.newRunId()
     };
-    if (this.canStart(run.agentId)) {
-      return { runId: run.runId, state: "started", started: this.launch(run) };
+    if (this.canStart(run)) {
+      return { runId: run.runId, state: "started", completed, started: this.launch(run) };
     }
     this.pending.push(run);
-    return { runId: run.runId, state: "queued" };
+    return { runId: run.runId, state: "queued", completed };
   }
 
   /** run 收束（正常、出错、被取消都算）。腾出的位置立刻让给排队的。 */
-  settle(runId: string): void {
+  settle(runId: string, status: RunOutcome = "completed"): void {
+    const run = this.active.get(runId);
     this.active.delete(runId);
+    run?.complete(status);
     this.pump();
   }
 
@@ -60,13 +73,27 @@ export class AgentScheduler {
    */
   cancelAgent(agentId: string): string[] {
     for (let i = this.pending.length - 1; i >= 0; i -= 1) {
-      if (this.pending[i]!.agentId === agentId) this.pending.splice(i, 1);
+      if (this.pending[i]!.agentId === agentId) this.pending.splice(i, 1)[0]!.complete("cancelled");
     }
     const cancelling: string[] = [];
     for (const run of this.active.values()) {
       if (run.agentId === agentId) cancelling.push(run.runId);
     }
     return cancelling;
+  }
+
+  /** Dropping queued work must also release anyone awaiting its completion. */
+  cancelQueued(runId: string): boolean {
+    const index = this.pending.findIndex(run => run.runId === runId);
+    if (index < 0) return false;
+    this.pending.splice(index, 1)[0]!.complete("cancelled");
+    return true;
+  }
+
+  close(): void {
+    for (const run of [...this.pending, ...this.active.values()]) run.complete("cancelled");
+    this.pending.length = 0;
+    this.active.clear();
   }
 
   agentIdFor(runId: string): string | undefined {
@@ -93,6 +120,10 @@ export class AgentScheduler {
     return this.pending.some((run) => run.agentId === agentId);
   }
 
+  queuedForAgent(agentId: string): RunContext[] {
+    return this.pending.filter((run) => run.agentId === agentId).map((run) => run.context);
+  }
+
   activeRunIds(): string[] {
     return [...this.active.keys()];
   }
@@ -101,10 +132,11 @@ export class AgentScheduler {
     return this.pending.length;
   }
 
-  private canStart(agentId: string): boolean {
+  private canStart(candidate: RunRequest): boolean {
     if (this.active.size >= this.maxConcurrent) return false;
     for (const run of this.active.values()) {
-      if (run.agentId === agentId) return false;
+      if (run.agentId === candidate.agentId) return false;
+      if (run.projectRoot && candidate.projectRoot && (containsRoot(run.projectRoot, candidate.projectRoot) || containsRoot(candidate.projectRoot, run.projectRoot))) return false;
     }
     return true;
   }
@@ -113,7 +145,7 @@ export class AgentScheduler {
     this.active.set(run.runId, run);
     const started = run.start(run.runId);
     // 自己收尾，这样没人 await 时槽位也不会永久漏掉。
-    started.catch(() => this.settle(run.runId));
+    started.catch(() => this.settle(run.runId, "failed"));
     return started;
   }
 
@@ -123,9 +155,17 @@ export class AgentScheduler {
    */
   private pump(): void {
     while (this.active.size < this.maxConcurrent) {
-      const index = this.pending.findIndex((run) => this.canStart(run.agentId));
+      const index = this.pending.findIndex((run) => this.canStart(run));
       if (index < 0) return;
       void this.launch(this.pending.splice(index, 1)[0]!);
     }
   }
+}
+
+function canonicalRoot(root: string): string {
+  try { return realpathSync.native(root); } catch { return path.resolve(root); }
+}
+function containsRoot(parent: string, child: string): boolean {
+  const relative = path.relative(parent, child);
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }

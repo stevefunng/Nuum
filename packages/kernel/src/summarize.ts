@@ -9,7 +9,7 @@ import { selectModel } from "./model/router.js";
  */
 export async function runSummarize(
   params: SummarizeRunParams,
-  deps: { selectModel: typeof selectModel } = { selectModel }
+  deps: { selectModel: typeof selectModel; signal?: AbortSignal } = { selectModel }
 ): Promise<SummarizeRunResult> {
   const { port, apiKey } = deps.selectModel(params.model, params.secrets);
   const messages = [
@@ -17,9 +17,9 @@ export async function runSummarize(
     ...params.messages
   ];
   let text = "";
-  // 不给取消：这是一次短的单发调用，调用方等的就是它的返回值。
-  const never = new AbortController().signal;
-  for await (const chunk of port.streamChat({ model: params.model, messages, tools: [], apiKey }, never)) {
+  const timeout = AbortSignal.timeout(params.timeoutMs ?? 60_000);
+  const signal = deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout;
+  for await (const chunk of port.streamChat({ model: params.model, messages, tools: [], apiKey, maxOutputTokens: params.maxOutputTokens ?? 2048 }, signal)) {
     // thinking 不进结果：调用方要的是摘要本身，不是它怎么想出来的。
     if (chunk.type === "text") text += chunk.text;
   }

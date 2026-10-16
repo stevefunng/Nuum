@@ -1,5 +1,6 @@
 import {
   DELEGATED_TOOL_DEFINITIONS,
+  CreateTaskParams, ClaimTaskParams, ReadTaskParams,
   DelegateWorkParams,
   DelegatedToolNames,
   ReadAgentTranscriptParams,
@@ -7,6 +8,7 @@ import {
   ReadWorkTimelineParams,
   RunWorkCliParams,
   SendMessageParams,
+  WorkSendMessageParams,
   SendToAgentParams,
   StopAgentParams,
   HandoffTaskParams,
@@ -43,11 +45,15 @@ export interface DelegatedToolContext {
  * 都在 `HostRuntime` 上，这样工具层没有自己的状态。
  */
 export interface DelegateHost {
+  createTaskFromModel(agentId: string, params: CreateTaskParams, context: DelegatedToolContext): Promise<string>;
+  claimTask(agentId: string, params: ClaimTaskParams, context: DelegatedToolContext): Promise<string>;
+  readTask(agentId: string, params: ReadTaskParams, context: DelegatedToolContext): Promise<string>;
   sendMessage(
     agentId: string,
     params: SendMessageParams,
     source: Pick<DelegatedToolContext, "assistantId" | "toolCallId">
   ): Promise<string>;
+  sendWorkMessage(agentId: string, params: WorkSendMessageParams, context: DelegatedToolContext): Promise<string>;
   updateState(agentId: string, params: UpdateStateParams): Promise<string>;
   createAgentFromModel(agentId: string, params: CreateAgentParams): Promise<string>;
   updateAgentFromModel(agentId: string, params: UpdateAgentParams): Promise<string>;
@@ -66,6 +72,7 @@ type Handler = (args: Record<string, unknown>, context: DelegatedToolContext) =>
 
 const DEFAULT_RUN_KINDS: readonly RunContext["kind"][] = ["direct"];
 const WORK_TOOL_NAMES = new Set<string>([
+  "CreateTask", "ClaimTask", "ReadTask",
   DelegatedToolNames.postToWork,
   DelegatedToolNames.handoffTask,
   DelegatedToolNames.readWorkTimeline,
@@ -81,7 +88,22 @@ export function delegatedToolsForRunContext(
   tools: Iterable<DelegatedTool>,
   context: RunContext
 ): DelegatedTool[] {
-  return [...tools].filter((tool) => isDelegatedToolAvailable(tool, context));
+  return [...tools].filter((tool) => isDelegatedToolAvailable(tool, context))
+    .filter((tool) => context.kind !== "work" || !["PostToWork", "HandoffTask"].includes(tool.definition.name))
+    .map((tool) => context.kind === "work" && tool.definition.name === "SendMessage" ? {
+      ...tool,
+      definition: {
+        ...tool.definition,
+        description: "Send a public message to this room as yourself. Include cardAction so the summary and card update commit together: review by a worker returns results to the permanent owner; review by the owner requests human acceptance. blocked pauses the card until human confirmation. Stop after review or blocked. Silence is allowed when you have nothing useful to add.",
+        inputSchema: { type: "object", required: ["type", "content"], properties: {
+          type: { type: "string", enum: ["text"] }, content: { type: "string" },
+          cardAction: { type: "object", required: ["status"], properties: {
+            status: { type: "string", enum: ["review", "blocked"] }, blocker_reason: { type: "string" },
+            expectedRevision: { type: "integer" }, deliverables: { type: "array", items: { type: "object", required: ["name", "uri"], properties: { name: { type: "string" }, uri: { type: "string" }, mime_type: { type: "string" } } } }
+          } }
+        } }
+      }
+    } : tool);
 }
 
 /**
@@ -90,8 +112,13 @@ export function delegatedToolsForRunContext(
  */
 export function createDelegatedTools(host: Partial<DelegateHost>): DelegatedTool[] {
   const handlers: Record<string, Handler | undefined> = {
+    CreateTask: host.createTaskFromModel ? (args, context) => host.createTaskFromModel!(context.agentId, CreateTaskParams.parse(args), context) : undefined,
+    ClaimTask: host.claimTask ? (args, context) => host.claimTask!(context.agentId, ClaimTaskParams.parse(args), context) : undefined,
+    ReadTask: host.readTask ? (args, context) => host.readTask!(context.agentId, ReadTaskParams.parse(args), context) : undefined,
     [DelegatedToolNames.sendMessage]: host.sendMessage
-      ? (args, context) => host.sendMessage!(context.agentId, SendMessageParams.parse(args), context)
+      ? (args, context) => context.runContext.kind === "work"
+        ? host.sendWorkMessage!(context.agentId, WorkSendMessageParams.parse(args), context)
+        : host.sendMessage!(context.agentId, SendMessageParams.parse(args), context)
       : undefined,
     [DelegatedToolNames.updateState]: host.updateState
       ? (args, context) => host.updateState!(context.agentId, UpdateStateParams.parse(args))
@@ -135,7 +162,7 @@ export function createDelegatedTools(host: Partial<DelegateHost>): DelegatedTool
     (definition: ToolDefinition) => handlers[definition.name] !== undefined
   ).map((definition: ToolDefinition) => ({
     definition,
-    ...(WORK_TOOL_NAMES.has(definition.name)
+    ...(definition.name === "SendMessage" ? { runKinds: ["direct", "work"] as const } : WORK_TOOL_NAMES.has(definition.name)
       ? { runKinds: ["work"] as const }
       : {}),
     execute: async (args, context) => {

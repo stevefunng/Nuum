@@ -15,16 +15,19 @@ export const KernelMethods = {
   sysPing: "sys.ping",
   sysShutdown: "sys.shutdown",
   turnStart: "turn.start",
+  turnProvideContext: "turn.provideContext",
   turnCancel: "turn.cancel",
   turnApproveTool: "turn.approveTool",
   turnDenyTool: "turn.denyTool",
   turnProvideToolResult: "turn.provideToolResult",
   shellDispose: "shell.dispose",
   summarizeRun: "summarize.run",
+  summarizeCancel: "summarize.cancel",
   toolsList: "tools.list"
 } as const;
 
 export const KernelEvents = {
+  turnContext: "turn.context",
   turnDelta: "turn.delta",
   turnToolPending: "turn.tool.pending",
   turnToolStarted: "turn.tool.started",
@@ -41,6 +44,7 @@ export const KernelEvents = {
 export const TurnStartParams = z.object({
   runId: z.string(),
   messages: z.array(ChatMessage),
+  contextWindow: z.number().positive().optional(),
   model: ModelRef,
   roots: z.object({
     home: z.string(),
@@ -88,7 +92,8 @@ export const TurnToolResult = z.object({
   runId: z.string(),
   toolCallId: z.string(),
   ok: z.boolean(),
-  output: z.string()
+  output: z.string(),
+  endTurn: z.boolean().optional()
 });
 export type TurnToolResult = z.infer<typeof TurnToolResult>;
 
@@ -97,9 +102,11 @@ export type TurnToolResult = z.infer<typeof TurnToolResult>;
  * Kernel 是唯一持有 model port 的地方 —— Host 绝不直接碰模型（§3.2）。
  */
 export const SummarizeRunParams = z.object({
-  /** 只作关联标识：这条调用不进 `runs`，也不可取消。 */
+  /** 只作关联标识：这条调用独立于 turn runs，通过 summarize.cancel 取消。 */
   runId: z.string(),
   systemPrompt: z.string(),
+  timeoutMs: z.number().positive().optional(),
+  maxOutputTokens: z.number().int().positive().optional(),
   messages: z.array(ChatMessage),
   model: ModelRef,
   secrets: Secrets
@@ -168,3 +175,8 @@ export type TurnEndedEvent = z.infer<typeof TurnEndedEvent>;
 
 export type KernelHello = { name: "nuum-kernel"; version: "0.1.0" };
 export const KernelToolList = z.array(ToolDefinition);
+
+export const TurnContextResult = z.object({
+  runId: z.string(), requestId: z.string(), messages: z.array(ChatMessage).optional(), error: z.string().optional()
+});
+export type TurnContextResult = z.infer<typeof TurnContextResult>;

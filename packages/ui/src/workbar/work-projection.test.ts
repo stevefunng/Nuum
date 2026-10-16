@@ -16,14 +16,14 @@ test("board projects only the four active states; proposed folds into ready and 
   assert.deepEqual(lanes.find((lane) => lane.state === "ready")?.tasks.map((item) => item.id), ["a", "b"]);
   assert.deepEqual(lanes.find((lane) => lane.state === "in_progress")?.tasks.map((item) => item.id), ["c"]);
   assert.deepEqual(lanes.find((lane) => lane.state === "blocked")?.tasks.map((item) => item.id), ["d"]);
-  assert.equal(lanes.flatMap((lane) => lane.tasks).find((item) => item.id === "e"), undefined);
+  assert.equal(lanes.find((lane) => lane.state === "review")?.tasks[0]?.id, "e");
   assert.equal(lanes.flatMap((lane) => lane.tasks).find((item) => item.id === "f"), undefined);
   assert.equal(laneOf("cancelled"), null);
 });
 
-test("completed tasks are collected for the deliverables page, review included", () => {
+test("only accepted tasks are collected as completed", () => {
   const tasks = [task("a", "review"), task("b", "done"), task("c", "in_progress")];
-  assert.deepEqual(completedTasks(tasks).map((item) => item.id), ["a", "b"]);
+  assert.deepEqual(completedTasks(tasks).map((item) => item.id), ["b"]);
 });
 
 test("outputs include review handoffs, sorted newest first with their source task", () => {

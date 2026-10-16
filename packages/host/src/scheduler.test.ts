@@ -157,3 +157,30 @@ test("queued runs count as busy so the sidebar does not flicker back to idle", (
   scheduler.submit(held("b", []));
   assert.equal(scheduler.isBusy("b"), true);
 });
+
+test("awaiting completion observes settled runs and queued cancellation, not just kernel start", async () => {
+  const scheduler = new AgentScheduler(1, counted());
+  const first = scheduler.submit(held("a", []));
+  const second = scheduler.submit(held("a", []));
+  let completed = false;
+  void first.completed.then(() => { completed = true; });
+  await first.started;
+  assert.equal(completed, false);
+  scheduler.cancelAgent("a");
+  assert.equal(await second.completed, "cancelled");
+  scheduler.settle(first.runId, "failed");
+  assert.equal(await first.completed, "failed");
+});
+
+test("different agents sharing a writable project do not run concurrently", async () => {
+  const scheduler = new AgentScheduler(3, counted());
+  const log: string[] = [];
+  const a = scheduler.submit({ ...held("a", log), projectRoot: "/project" });
+  const b = scheduler.submit({ ...held("b", log), projectRoot: "/project/subdir" });
+  const c = scheduler.submit({ ...held("c", log), projectRoot: "/other" });
+  assert.equal(b.state, "queued");
+  assert.equal(c.state, "started");
+  scheduler.settle(a.runId);
+  await Promise.resolve();
+  assert.ok(log.includes(`b:${b.runId}`));
+});

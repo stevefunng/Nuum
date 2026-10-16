@@ -1,6 +1,7 @@
 import path from "node:path";
 import {
   KernelErrorCode,
+  estimateModelTokens,
   RpcError,
   type ChatMessage,
   type LocalToolAction,
@@ -15,9 +16,10 @@ import { selectModel } from "./model/router.js";
 import type { KernelEmitter } from "./types.js";
 
 export interface TurnHandle {
+  provideContext(requestId: string, messages?: ChatMessage[], error?: string): void;
   cancel(): void;
   decide(toolCallId: string, resolution: ToolResolution): void;
-  provideToolResult(toolCallId: string, ok: boolean, output: string): void;
+  provideToolResult(toolCallId: string, ok: boolean, output: string, endTurn?: boolean): void;
 }
 
 /** 模型选路是唯一的外部副作用，抽成接缝才能在单测里驱动整个 loop。 */
@@ -78,7 +80,8 @@ export function startTurn(
 ): TurnHandle {
   const abort = new AbortController();
   const decisions = new Map<string, (value: ToolResolution) => void>();
-  const delegations = new Map<string, (value: { ok: boolean; output: string }) => void>();
+  const delegations = new Map<string, (value: { ok: boolean; output: string; endTurn?: boolean }) => void>();
+  const contexts = new Map<string, (value: { messages?: ChatMessage[]; error?: string }) => void>();
   const delegated = new Set(params.delegatedTools.map((tool) => tool.name));
   let activeSandbox: ReturnType<typeof createSandbox> | null = null;
   void run().catch((error) => {
@@ -93,6 +96,7 @@ export function startTurn(
   });
 
   return {
+    provideContext(requestId, messages, error) { contexts.get(requestId)?.({ messages, error }); },
     cancel() {
       abort.abort();
       void activeSandbox?.disposeShell();
@@ -100,8 +104,8 @@ export function startTurn(
     decide(toolCallId, resolution) {
       decisions.get(toolCallId)?.(resolution);
     },
-    provideToolResult(toolCallId, ok, output) {
-      delegations.get(toolCallId)?.({ ok, output });
+    provideToolResult(toolCallId, ok, output, endTurn) {
+      delegations.get(toolCallId)?.({ ok, output, endTurn });
     }
   };
 
@@ -124,12 +128,27 @@ export function startTurn(
     const reminded = new Set<ReminderKind>();
     for (let round = 0; round < MAX_ROUNDS; round += 1) {
       if (abort.signal.aborted) throw new TurnCancelled();
+      if (params.contextWindow) {
+        const requestId = crypto.randomUUID();
+        const pending = waitFor(contexts, requestId);
+        const usedTokens = estimateModelTokens(messages, tools);
+        emit("turn.context", { runId: params.runId, requestId, usedTokens });
+        const next = await pending;
+        if (next.error) throw new Error(next.error);
+        if (next.messages) {
+          // Images and reminders are Kernel-local; keep them when Host rebuilds the persisted history.
+          const local = messages.filter(message => message.images?.length || message.id.startsWith("reminder-"));
+          messages.splice(0, messages.length, ...next.messages, ...local.filter(message => !next.messages!.some(item => item.id === message.id)));
+        }
+        if (estimateModelTokens(messages, tools) > params.contextWindow * 0.9) throw new Error("Context capacity exhausted; execution paused without replaying tools.");
+        if (abort.signal.aborted) throw new TurnCancelled();
+      }
       const messageId = crypto.randomUUID();
       let text = "";
       let thinking = "";
       const toolCalls: ToolCall[] = [];
       try {
-        for await (const chunk of port.streamChat({ model: params.model, messages, tools, apiKey }, abort.signal)) {
+        for await (const chunk of port.streamChat({ model: params.model, messages, tools, apiKey, ...(params.contextWindow ? { maxOutputTokens: Math.max(1, Math.min(4096, Math.floor(params.contextWindow * 0.1))) } : {}) }, abort.signal)) {
           if (chunk.type === "thinking") {
             thinking += chunk.text;
             emit("turn.delta", { runId: params.runId, messageId, delta: chunk.text, part: "thinking" });
@@ -177,6 +196,10 @@ export function startTurn(
           ok: result.ok,
           output: result.output
         });
+        if (result.ok && result.endTurn) {
+          emit("turn.ended", { runId: params.runId, status: "idle" });
+          return;
+        }
         if (voiceTools.has(call.name)) {
           toolCallsSinceVoice = 0;
           voiceSentThisTurn = true;
@@ -234,7 +257,7 @@ export function startTurn(
   async function resolveToolCall(
     call: ToolCall,
     sandbox: ReturnType<typeof createSandbox>
-  ): Promise<{ ok: boolean; output: string; images?: ModelImage[] }> {
+  ): Promise<{ ok: boolean; output: string; images?: ModelImage[]; endTurn?: boolean }> {
     if (delegated.has(call.name)) {
       emit("turn.tool.delegate", {
         runId: params.runId,

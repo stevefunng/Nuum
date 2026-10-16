@@ -110,6 +110,7 @@ export type AgentSettings = z.infer<typeof AgentSettings>;
  * 磁盘上的假 running。
  */
 export const AgentRuntime = z.object({
+  activeRunId: z.string().optional(),
   status: AgentStatus,
   unread: z.boolean(),
   lastActivityAt: z.number()
@@ -117,6 +118,7 @@ export const AgentRuntime = z.object({
 export type AgentRuntime = z.infer<typeof AgentRuntime>;
 
 export const AgentView = z.object({
+  roomMemberships: z.record(WorkMembership).optional(),
   profile: AgentProfile,
   settings: AgentSettings,
   runtime: AgentRuntime

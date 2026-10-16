@@ -3,8 +3,8 @@ import type { WorkCatalogAddParams } from "@nuum/protocol";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { SandIcon } from "../kit/sand-kit-primitives";
 
-export function WorkDialog({ title, subtitle, children, onClose }: {
-  title: string; subtitle: string; children: ReactNode; onClose(): void;
+export function WorkDialog({ title, subtitle, className, children, onClose }: {
+  title: string; subtitle?: string; className?: string; children: ReactNode; onClose(): void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -14,12 +14,12 @@ export function WorkDialog({ title, subtitle, children, onClose }: {
     dialog?.querySelector<HTMLElement>("[data-autofocus]")?.focus();
     return () => { dialog?.close(); previous?.focus(); };
   }, []);
-  return <dialog className="sand-work-dialog" ref={ref} aria-label={title} onCancel={onClose} onClick={(event) => {
+  return <dialog className={["sand-work-dialog", className].filter(Boolean).join(" ")} ref={ref} aria-label={title} onCancel={onClose} onClick={(event) => {
     if (event.target !== event.currentTarget) return;
     const box = event.currentTarget.getBoundingClientRect();
     if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) onClose();
   }}>
-    <header><div><h2>{title}</h2><p>{subtitle}</p></div><button className="sand-work-icon-button" aria-label={t("Close dialog")} onClick={onClose} type="button"><SandIcon name="close" size={16} /></button></header>
+    <header><div><h2>{title}</h2>{subtitle ? <p>{subtitle}</p> : null}</div><button className="sand-work-icon-button" aria-label={t("Close dialog")} onClick={onClose} type="button"><SandIcon name="close" size={16} /></button></header>
     {children}
   </dialog>;
 }

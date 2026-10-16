@@ -10,6 +10,9 @@ import { OutboundMessage } from "./transcript.js";
  * 包边界一条规则都不用改（§3.3）。
  */
 export const DelegatedToolNames = {
+  createTask: "CreateTask",
+  claimTask: "ClaimTask",
+  readTask: "ReadTask",
   sendMessage: "SendMessage",
   updateState: "update_state",
   createAgent: "CreateAgent",
@@ -135,6 +138,13 @@ export type CheckAgentParams = z.infer<typeof CheckAgentParams>;
 export const StopAgentParams = z.object({ agent_id: z.string() });
 export type StopAgentParams = z.infer<typeof StopAgentParams>;
 
+export const CreateTaskParams = z.object({ title: z.string().trim().min(1), description: z.string().default(""), acceptanceCriteria: z.array(z.string()).default([]), assigneeIds: z.array(z.string()).default([]) });
+export type CreateTaskParams = z.infer<typeof CreateTaskParams>;
+export const ClaimTaskParams = z.object({ taskId: z.string().min(1), expectedRevision: z.number().int().positive() });
+export type ClaimTaskParams = z.infer<typeof ClaimTaskParams>;
+export const ReadTaskParams = z.object({ taskId: z.string().optional() });
+export type ReadTaskParams = z.infer<typeof ReadTaskParams>;
+
 export const PostToWorkParams = z.object({ message: z.string().min(1) });
 export type PostToWorkParams = z.infer<typeof PostToWorkParams>;
 
@@ -150,7 +160,19 @@ export const HandoffTaskParams = z.object({
 });
 export type HandoffTaskParams = z.infer<typeof HandoffTaskParams>;
 
-export const ReadWorkTimelineParams = z.object({ limit: z.number().int().positive().max(100).default(30) });
+export const WorkSendMessageParams = z.object({
+  type: z.literal("text"),
+  content: z.string().trim().min(1),
+  cardAction: z.object({
+    status: z.enum(["review", "blocked"]),
+    blocker_reason: z.string().trim().min(1).optional(),
+    expectedRevision: z.number().int().positive().optional(),
+    deliverables: HandoffTaskParams.shape.deliverables
+  }).optional()
+}).strict();
+export type WorkSendMessageParams = z.infer<typeof WorkSendMessageParams>;
+
+export const ReadWorkTimelineParams = z.object({ beforeSeq: z.number().int().positive().optional(), afterSeq: z.number().int().nonnegative().optional(), limit: z.number().int().positive().max(100).default(30) });
 export type ReadWorkTimelineParams = z.infer<typeof ReadWorkTimelineParams>;
 
 export const RunWorkCliParams = z.object({
@@ -169,6 +191,9 @@ export type DelegateWorkParams = z.infer<typeof DelegateWorkParams>;
 const AGENT_ID = { type: "string", description: "The agent's id, as listed in your teammate directory." };
 
 export const DELEGATED_TOOL_DEFINITIONS: ToolDefinition[] = [
+  { name: "CreateTask", description: "Create a ready card in this NunuBar. You become its permanent owner. Include acceptance criteria and optional workers; DelegateWork starts their independent card sessions.", inputSchema: { type: "object", required: ["title"], properties: { title: { type: "string" }, description: { type: "string" }, acceptanceCriteria: { type: "array", items: { type: "string" } }, assigneeIds: { type: "array", items: { type: "string" } } } }, mutating: false },
+  { name: "ClaimTask", description: "Atomically join or start a ready card as a worker, without changing its creator-owner. Blocked cards require human confirmation. ReadTask supplies expectedRevision.", inputSchema: { type: "object", required: ["taskId", "expectedRevision"], properties: { taskId: { type: "string" }, expectedRevision: { type: "integer" } } }, mutating: false },
+  { name: "ReadTask", description: "Read a task's current state and revision, or list this NunuBar's tasks when taskId is omitted.", inputSchema: { type: "object", properties: { taskId: { type: "string" } } }, mutating: false },
   {
     name: DelegatedToolNames.sendMessage,
     description:
@@ -352,7 +377,7 @@ export const DELEGATED_TOOL_DEFINITIONS: ToolDefinition[] = [
     description: "Read the latest entries from the current Work timeline.",
     inputSchema: {
       type: "object",
-      properties: { limit: { type: "number" } }
+      properties: { limit: { type: "number" }, beforeSeq: { type: "integer" }, afterSeq: { type: "integer" } }
     },
     mutating: false
   },
@@ -371,7 +396,7 @@ export const DELEGATED_TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: DelegatedToolNames.delegateWork,
-    description: "Delegate work to another Agent in the current Work. Only a coordinator can use this.",
+    description: "Dispatch a room member as a worker. Specify task_id (defaults to the current card); room-only discussion must use @ in SendMessage. Workers use independent card sessions: the creator stays owner and worker results return there. Blocked cards require human confirmation before further dispatch.",
     inputSchema: {
       type: "object",
       required: ["agent_id", "instruction"],

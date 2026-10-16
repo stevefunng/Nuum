@@ -3,13 +3,15 @@ import type {
   AgentView,
   WorkCatalogAddParams,
   WorkSnapshot,
-  WorkTaskState
+  WorkTaskState,
+  TranscriptEvent
 } from "@nuum/protocol";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { AutoTextarea } from "../kit/auto-textarea";
 import { WorkResizeHandle } from "./work-resize";
 import { inspectorBounds, projectInspectorLayout, readInspectorPreference, writeInspectorPreference, workDisplayTitle } from "./work-layout";
 import { TaskLanes, WorkDeliverables, STATE_LABELS } from "./work-content";
+import { MemberStatusBubble } from "./member-status-bubble";
 import { WorkChatDock } from "./work-chat";
 import { useAgentDrag } from "./agent-drag";
 import { SandIcon } from "../kit/sand-kit-primitives";
@@ -23,8 +25,9 @@ export function WorkCreation({
 }: {
   canCancel: boolean;
   onCancel(): void;
-  onCreate(input: { name: string; description: string }): void;
+  onCreate(input: { name: string; description: string; kind: "room" | "work" }): void;
 }) {
+  const [kind, setKind] = useState<"room" | "work">("work");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   return (
@@ -33,6 +36,10 @@ export function WorkCreation({
         <span className="sand-work-create__eyebrow">{t("A place for the job, not another chat")}</span>
         <h1>{t("Create a Work")}</h1>
         <p>{t("Keep tasks, shared discussion, Agents, capabilities, and deliverables together.")}</p>
+        <div className="sand-work-kind-picker">
+          <button type="button" aria-pressed={kind === "room"} onClick={() => setKind("room")}>{t("Local room")}</button>
+          <button type="button" aria-pressed={kind === "work"} onClick={() => setKind("work")}>NunuBar</button>
+        </div>
         <label>
           <span>{t("Name")}</span>
           <input autoFocus onChange={(event) => setName(event.target.value)} placeholder={t("e.g. Product launch")} value={name} />
@@ -43,7 +50,7 @@ export function WorkCreation({
         </label>
         <div className="sand-work-create__actions">
           {canCancel ? <button onClick={onCancel} type="button">{t("Cancel")}</button> : null}
-          <button disabled={!name.trim()} onClick={() => onCreate({ name: name.trim(), description: description.trim() })} type="button">{t("Create Work")}</button>
+          <button disabled={!name.trim()} onClick={() => onCreate({ name: name.trim(), description: description.trim(), kind })} type="button">{t("Create Work")}</button>
         </div>
       </div>
     </section>
@@ -54,12 +61,14 @@ export interface WorkBoardProps {
   snapshot: WorkSnapshot;
   agents: readonly AgentView[];
   onPostMessage(body: string): void;
-  onUpdateWork(patch: { description: string; projectRoot: string | null }): void;
+  onContinue(eventId: string, inputAfterSeq?: number): void;
+  onStopDiscussion(): void;
+  onUpdateWork(patch: { description: string; projectRoot: string | null; kind?: "work" }): void;
   onCreateTask(input: { title: string; assigneeIds: string[] }): void;
   onTransitionTask(taskId: string, to: WorkTaskState, expectedRevision: number, blockerReason?: string): void;
+  onReadTaskTrace?(taskId: string, sessionId?: string, beforeSeq?: number): Promise<{ sessions: { id: string; agentId: string }[]; sessionId?: string; entries: TranscriptEvent[]; beforeSeq?: number }>;
   onDispatchTask(agentId: string, taskId: string, instruction: string): void;
   onDetachAgent(agentId: string, expectedRevision: number): void;
-  onOpenAgent(agentId: string): void;
   onMoveAgentToWork(agentId: string, workId: string): void;
   onPickDirectory(): Promise<string | null>;
   onAddCatalogEntry(entry: WorkCatalogAddParams["entry"]): Promise<boolean>;
@@ -70,17 +79,24 @@ export function WorkBoard({
   snapshot,
   agents,
   onPostMessage,
+  onContinue,
+  onStopDiscussion,
   onUpdateWork,
   onCreateTask,
   onTransitionTask,
   onDispatchTask,
+  onReadTaskTrace,
   onDetachAgent,
-  onOpenAgent,
   onMoveAgentToWork,
   onPickDirectory,
   onAddCatalogEntry,
   onRemoveCatalogEntry
 }: WorkBoardProps) {
+  const [statusAnchor, setStatusAnchor] = useState<{ id: string; element: HTMLElement; shape: number } | null>(null);
+  const statusShape = useRef(0);
+  useEffect(() => setStatusAnchor(null), [snapshot.profile.id]);
+  const statusAgent = statusAnchor && snapshot.members.some(member => member.profile.id === statusAnchor.id) ? agents.find(agent => agent.profile.id === statusAnchor.id) : undefined;
+  const [recentHistoryCount, setRecentHistoryCount] = useState(24);
   const mainRef = useRef<HTMLDivElement>(null);
   const [mainSize, setMainSize] = useState({ width: 960, height: 620 });
   const [inspectorPreference, setInspectorPreference] = useState(readInspectorPreference);
@@ -94,6 +110,9 @@ export function WorkBoard({
   useEffect(() => writeInspectorPreference(inspectorPreference), [inspectorPreference]);
   const inspector = projectInspectorLayout(inspectorPreference, mainSize.width, mainSize.height);
   const bounds = inspectorBounds(mainSize.width, mainSize.height);
+  const [dispatchWorkerId, setDispatchWorkerId] = useState("");
+  const [trace, setTrace] = useState<Awaited<ReturnType<NonNullable<WorkBoardProps["onReadTaskTrace"]>>> | null>(null);
+  const [traceError, setTraceError] = useState("");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [page, setPage] = useState<"tasks" | "deliverables">("tasks");
   const [dispatchInstruction, setDispatchInstruction] = useState("");
@@ -118,6 +137,7 @@ export function WorkBoard({
           <h1>{workDisplayTitle(snapshot.profile.name)}</h1>
         </div>
         <div className="sand-work-board__summary">
+{snapshot.discussionRunning ? <button type="button" onClick={onStopDiscussion}>{t("Stop discussion")}</button> : null}
           <span><i />{snapshot.tasks.filter((task) => task.state === "in_progress").length}{" "}{t("active")}</span>
           {snapshot.tasks.some((task) => task.state === "blocked") ? <span>{snapshot.tasks.filter((task) => task.state === "blocked").length} {t("Blocked")}</span> : null}
           <button className="sand-work-icon-button" aria-label={t("Work settings")} onClick={() => setDialog("setup")} type="button"><SandIcon name="sliders" /></button>
@@ -125,6 +145,10 @@ export function WorkBoard({
       </header>
       <div className="sand-work-board__main" ref={mainRef} style={{ "--work-inspector-width": `${inspector.width}px`, "--work-capability-height": `${inspector.capabilityHeight}px` } as CSSProperties}>
         <div className="sand-work-board__center">
+          {snapshot.profile.kind === "room" ? <div className="sand-work-page-heading">
+            <strong>{t("Local room")}</strong>
+            <button type="button" onClick={() => onUpdateWork({ description: snapshot.profile.description, projectRoot: snapshot.profile.projectRoot, kind: "work" })}>{t("Enable task board")}</button>
+          </div> : <>
           <div className="sand-work-page-heading">
             <button className="sand-work-page-switch" type="button" title={page === "tasks" ? t("切换到产物") : t("切换到 Tasks")} aria-label={page === "tasks" ? t("切换到产物") : t("切换到 Tasks")}
               onClick={() => setPage(page === "tasks" ? "deliverables" : "tasks")}>
@@ -136,14 +160,28 @@ export function WorkBoard({
           <div className="sand-work-pages" data-page={page}>
             <div className="sand-work-pages__rotor">
               <section className="sand-work-page sand-work-page--tasks" aria-label={t("Tasks")} inert={page !== "tasks"} aria-hidden={page !== "tasks"}>
-                <TaskLanes tasks={snapshot.tasks} agents={agents} onOpen={(id) => { setSelectedTaskId(id); setDispatchInstruction(""); }} />
+                <TaskLanes tasks={snapshot.tasks} agents={agents} onOpen={(id) => { setSelectedTaskId(id); setDispatchInstruction(""); setTrace(null); setTraceError(""); }} />
               </section>
               <section className="sand-work-page sand-work-page--deliverables" aria-label={t("产物")} inert={page !== "deliverables"} aria-hidden={page !== "deliverables"}>
                 <WorkDeliverables tasks={snapshot.tasks} agents={agents} onOpenTask={setSelectedTaskId} />
               </section>
             </div>
           </div>
-          <WorkChatDock chat={snapshot.chat} agents={agents} onPostMessage={onPostMessage} />
+          </>}
+          {snapshot.interruptions.length ? <div className="sand-work-notices" role="status">
+      {snapshot.interruptions.map(item => <div className="sand-work-notice" key={item.eventId}>
+        <span>{item.agentId ? `${snapshot.members.find(member => member.profile.id === item.agentId)?.profile.name ?? item.agentId}: ` : ""}{t(item.error)}</span>
+        <button type="button" onClick={() => onContinue(item.eventId)}>{t("Continue")}</button>
+        {!item.taskId ? <details>
+          <summary>{t("Use less room history")}</summary>
+          <label>{t("Only include the most recent messages")}
+            <input type="number" min={1} max={Math.max(1, snapshot.chat.length)} value={recentHistoryCount} onChange={event => setRecentHistoryCount(Math.max(1, Number(event.target.value) || 1))} />
+          </label>
+          <button type="button" onClick={() => onContinue(item.eventId, Math.max(0, (snapshot.chat.slice(-recentHistoryCount)[0]?.seq ?? 1) - 1))}>{t("Continue with this history")}</button>
+        </details> : null}
+      </div>)}
+          </div> : null}
+          <WorkChatDock expanded={snapshot.profile.kind === "room"} chat={snapshot.chat} agents={agents} onPostMessage={onPostMessage} />
         </div>
 
         <aside className="sand-work-inspector">
@@ -159,6 +197,7 @@ export function WorkBoard({
             onChange={(height) => setInspectorPreference((current) => ({ ...current, split: height / Math.max(1, mainSize.height) }))} />
           <section className="sand-work-inspector__members" data-agent-drop-work={snapshot.profile.id}>
             <div className="sand-work-section-heading"><div><span>{t("Agents")}</span><small>{snapshot.members.length}</small></div></div>
+            {statusAgent && statusAnchor ? <MemberStatusBubble key={`${statusAnchor.id}:${statusAnchor.shape}`} shape={statusAnchor.shape} agent={statusAgent} snapshot={snapshot} anchor={statusAnchor.element} onClose={() => setStatusAnchor(null)} /> : null}
             <div className="sand-work-members">
               {snapshot.members.map((member) => (
                 <div
@@ -169,9 +208,9 @@ export function WorkBoard({
                   key={member.profile.id}
 
                 >
-                  <button className="sand-work-member__identity" onClick={() => onOpenAgent(member.profile.id)} type="button">
+                  <button className="sand-work-member__identity" aria-expanded={statusAnchor?.id === member.profile.id} onClick={(event) => { const element = event.currentTarget; if (statusAnchor?.id === member.profile.id) setStatusAnchor(null); else setStatusAnchor({ id: member.profile.id, element, shape: statusShape.current++ % 4 }); }} type="button">
                     <AgentAvatar agentId={member.profile.id} color={member.profile.avatarColor} shape={member.profile.avatarShape} size={34} state={member.runtime.status === "running" ? "working" : "idle"} />
-                    <span><strong>{member.profile.name}</strong><small>{t({ coordinator: "Coordinator", worker: "Worker", observer: "Observer" }[member.settings.workMembership?.binding?.role ?? "worker"])}</small></span>
+                    <span><strong>{member.profile.name}</strong></span>
                   </button>
                   <button
                     aria-label={t("Remove {name}", { name: member.profile.name })}
@@ -188,8 +227,9 @@ export function WorkBoard({
       {selectedTask ? <WorkDialog title={selectedTask.title} subtitle={t(STATE_LABELS[selectedTask.state])} onClose={() => setSelectedTaskId(null)}>
         <div className="sand-work-task-detail">
           {selectedTask.description ? <div className="sand-work-task-detail__summary">{selectedTask.description}</div> : null}
+          {selectedTask.ownerAgentId ? <div className="sand-work-task-meta"><span>{t("Card owner")}</span><strong>{agents.find(agent => agent.profile.id === selectedTask.ownerAgentId)?.profile.name ?? selectedTask.ownerAgentId}</strong></div> : null}
           <div className="sand-work-task-people">
-            <span>{t("Assigned to")}</span>
+            <span>{t("Workers")}</span>
             <div className="sand-work-task-people__list">
               {selectedTask.assigneeIds.length ? selectedTask.assigneeIds.map((id) => {
                 const agent = agents.find((item) => item.profile.id === id);
@@ -206,18 +246,43 @@ export function WorkBoard({
           {selectedTask.acceptanceCriteria.length ? <section><h3>{t("Acceptance criteria")}</h3><ul>{selectedTask.acceptanceCriteria.map((item, index) => <li key={index}>{item}</li>)}</ul></section> : null}
           {selectedTask.blocker ? <p className="sand-work-task-detail__blocker">{t("Blocked:")}{" "}{selectedTask.blocker.reason}</p> : null}
           {selectedTask.deliverables.length ? <section><h3>{t("产物")}</h3>{selectedTask.deliverables.map((file) => <div className="sand-work-task-file" key={file.id}><strong>{file.name}</strong><span>{file.uri}</span></div>)}</section> : null}
-          {selectedTask.state === "in_progress" && selectedTask.assigneeIds[0] ? (
+          {selectedTask.state === "blocked" ? <div className="sand-work-task-detail__actions">
+            <p>{t("This card is paused until you confirm how to proceed.")}</p>
+            <button type="button" onClick={() => onTransitionTask(selectedTask.id, "in_progress", selectedTask.revision)}>{t("Confirm and resume")}</button>
+            <button type="button" onClick={() => onTransitionTask(selectedTask.id, "cancelled", selectedTask.revision)}>{t("Cancel task")}</button>
+          </div> : null}
+          {selectedTask.state === "review" ? <div className="sand-work-task-detail__actions">
+            <button type="button" onClick={() => onTransitionTask(selectedTask.id, "in_progress", selectedTask.revision)}>{t("Request changes")}</button>
+            <button type="button" onClick={() => onTransitionTask(selectedTask.id, "done", selectedTask.revision)}>{t("Accept delivery")}</button>
+          </div> : null}
+          {onReadTaskTrace ? <section>
+            <button type="button" onClick={() => { setTraceError(""); void onReadTaskTrace(selectedTask.id).then(setTrace).catch((error: unknown) => setTraceError(String(error))); }}>{t("Execution history")}</button>
+            {traceError ? <p role="alert">{traceError}</p> : null}
+            {trace ? <div className="sand-work-trace">
+              <select aria-label={t("Execution history")} value={trace.sessionId ?? ""} onChange={(event) => { void onReadTaskTrace(selectedTask.id, event.target.value).then(setTrace).catch((error: unknown) => setTraceError(String(error))); }}>
+                {trace.sessions.map((session) => <option key={session.id} value={session.id}>{agents.find((agent) => agent.profile.id === session.agentId)?.profile.name ?? session.agentId} · {session.id.slice(0, 8)}</option>)}
+              </select>
+              {!trace.entries.length ? <p>{t("No execution history yet.")}</p> : null}
+              {trace.entries.map((event) => <details key={event.id}><summary>{event.seq} · {event.type}</summary><pre>{traceText(event)}</pre></details>)}
+              {trace.beforeSeq ? <button type="button" onClick={() => { void onReadTaskTrace(selectedTask.id, trace.sessionId, trace.beforeSeq).then((older) => setTrace({ ...older, entries: [...older.entries, ...trace.entries] })).catch((error: unknown) => setTraceError(String(error))); }}>{t("Load earlier")}</button> : null}
+            </div> : null}
+          </section> : null}
+          {["ready", "in_progress"].includes(selectedTask.state) ? (
             <div className="sand-work-task-detail__actions">
               <div className="sand-work-task-dispatch">
+                <select aria-label={t("Choose worker")} value={dispatchWorkerId} onChange={event => setDispatchWorkerId(event.target.value)}>
+                  <option value="">{t("Choose worker")}</option>
+                  {snapshot.members.filter(member => member.settings.workMembership?.binding?.grants.canManageOwnTasks).map(member => <option key={member.profile.id} value={member.profile.id}>{member.profile.name}</option>)}
+                </select>
                 <input
                   onChange={(event) => setDispatchInstruction(event.target.value)}
                   placeholder={t("Instruction for the Agent")}
                   value={dispatchInstruction}
                 />
                 <button
-                  disabled={!dispatchInstruction.trim()}
+                  disabled={!dispatchInstruction.trim() || !snapshot.members.some(member => member.profile.id === dispatchWorkerId)}
                   onClick={() => {
-                    onDispatchTask(selectedTask.assigneeIds[0]!, selectedTask.id, dispatchInstruction.trim());
+                    onDispatchTask(dispatchWorkerId, selectedTask.id, dispatchInstruction.trim());
                     setDispatchInstruction("");
                   }}
                   type="button"
@@ -238,4 +303,12 @@ export function WorkBoard({
 
     </section>
   );
+}
+
+
+function traceText(event: TranscriptEvent): string {
+  if (event.type === "user" || event.type === "wake") return event.text;
+  if (event.type === "assistant") return event.parts.map((part) => part.type === "tool_call" ? `${part.name}\n${JSON.stringify(part.arguments, null, 2)}` : part.text).join("\n\n");
+  if (event.type === "tool") return `${event.name}\n${event.content}`;
+  return JSON.stringify(event, null, 2);
 }

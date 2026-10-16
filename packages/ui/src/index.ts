@@ -26,3 +26,5 @@ export { SettingsSelect } from "./kit/settings-select";
 
 import "./proactive/proactive-panel.css";
 export { ProactivePanel } from "./proactive/proactive-panel";
+
+export { RoomSnapshotReplica } from "./workbar/room-sync";

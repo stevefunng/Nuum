@@ -46,10 +46,13 @@ export const HostMethods = {
   workMemberAttach: "work.member.attach",
   workMemberDetach: "work.member.detach",
   workMemberMove: "work.member.move",
+  workTaskTranscript: "work.task.transcript",
   workTaskCreate: "work.task.create",
   workTaskAssign: "work.task.assign",
   workTaskTransition: "work.task.transition",
   workDispatch: "work.dispatch",
+  workContinue: "work.continue",
+  workStopDiscussion: "work.stopDiscussion",
   workCatalogAdd: "work.catalog.add",
   workCatalogRemove: "work.catalog.remove",
   proactiveGet: "proactive.get",
@@ -76,6 +79,7 @@ export const HostEvents = {
 } as const;
 
 export const WorkCreateParams = z.object({
+  kind: z.enum(["room", "work"]).optional(),
   name: z.string().min(1),
   description: z.string().default(""),
   projectRoot: z.string().nullable().default(null)
@@ -86,6 +90,7 @@ export const WorkIdParams = z.object({ id: z.string().min(1) });
 export type WorkIdParams = z.infer<typeof WorkIdParams>;
 
 export const WorkUpdateParams = WorkIdParams.extend({
+  kind: z.literal("work").optional(),
   name: z.string().min(1).optional(),
   description: z.string().optional(),
   projectRoot: z.string().nullable().optional()
@@ -95,6 +100,8 @@ export type WorkUpdateParams = z.infer<typeof WorkUpdateParams>;
 export const WorkPostMessageParams = z.object({
   workId: z.string().min(1),
   body: z.string().min(1),
+  clientEventId: z.string().optional(),
+  inputAfterSeq: z.number().int().nonnegative().optional(),
   mentionedAgentIds: z.array(z.string()).default([])
 });
 export type WorkPostMessageParams = z.infer<typeof WorkPostMessageParams>;
@@ -122,6 +129,11 @@ export const WorkMemberMoveParams = z.object({
   expectedRevision: z.number().int().nonnegative()
 });
 export type WorkMemberMoveParams = z.infer<typeof WorkMemberMoveParams>;
+
+export const WorkTaskTranscriptParams = z.object({
+  workId: z.string().min(1), taskId: z.string().min(1),
+  sessionId: z.string().optional(), beforeSeq: z.number().int().positive().optional()
+});
 
 export const WorkTaskCreateParams = z.object({
   workId: z.string().min(1),
@@ -206,7 +218,13 @@ export const WorkCatalogRemoveParams = z.object({
 });
 export type WorkCatalogRemoveParams = z.infer<typeof WorkCatalogRemoveParams>;
 
+export const WorkContinueParams = z.object({ workId: z.string().min(1), eventId: z.string().min(1), inputAfterSeq: z.number().int().nonnegative().optional() });
+export type WorkContinueParams = z.infer<typeof WorkContinueParams>;
+
 export const WorkSnapshot = z.object({
+  discussionRunning: z.boolean(),
+  interruptions: z.array(z.object({ eventId: z.string(), agentId: z.string().optional(), taskId: z.string().optional(), error: z.string(), kind: z.enum(["discussion", "execution"]) })),
+  throughSeq: z.number().int().nonnegative(),
   profile: WorkProfile,
   members: z.array(AgentView),
   catalog: WorkCatalog,

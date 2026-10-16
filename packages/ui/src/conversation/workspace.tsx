@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { SandIcon, SandIconButton } from "../kit/sand-kit-primitives";
 import { AutoTextarea } from "../kit/auto-textarea";
 import { AGENT_AVATAR_MATERIAL_HIDDEN, AgentAvatar, rollAgentAvatar } from "./agent-avatar";
+import { AGENT_ROLE_TEMPLATES } from "./agent-templates";
 
 export interface PendingTool {
   toolCallId: string;
@@ -223,7 +224,8 @@ function NoticeBlock({ block }: { block: Extract<ViewBlock, { type: "notice" }> 
         {block.kind === "profile" ? (() => {
           const renamed = /^This agent changed name to "(.*)"\.$/.exec(block.text);
           return renamed ? t('This Nunu changed name to "{name}".', { name: renamed[1] }) : t("This Nunu changed its profile.");
-        })() : t(block.text)}
+        })() : block.kind === "wake" && block.text.startsWith("Participated in room: ")
+          ? t("Participated in room: {name}", { name: block.text.slice("Participated in room: ".length) }) : t(block.text)}
       </div>
     </article>
   );
@@ -326,12 +328,6 @@ function PeerConversation({ agent, peer, blocks, timestamps, onClose }: {
   );
 }
 
-const AGENT_TEMPLATES = [
-  { name: "Researcher", description: "Track a topic, read sources, and bring back concise findings." },
-  { name: "Project partner", description: "Stay with one project, remember decisions, and help move it forward." },
-  { name: "Daily operator", description: "Handle recurring local tasks and keep an eye on follow-ups." }
-] as const;
-
 function AgentCreation({
   canCancel,
   error,
@@ -398,7 +394,7 @@ function AgentCreation({
       <div className="sand-agent-create__suggestions">
         <span>{t("Or start with a role")}</span>
         <div>
-          {AGENT_TEMPLATES.map((template) => (
+          {AGENT_ROLE_TEMPLATES.map((template) => (
             <button
               key={t(template.name)}
               onClick={() => {

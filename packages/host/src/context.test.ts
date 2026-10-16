@@ -208,8 +208,8 @@ test("a Work wake directs output to Work tools instead of the private chat", () 
       hops: 0
     }]
   });
-  assert.match(assembled[1]?.content ?? "", /PostToWork/);
-  assert.match(assembled[1]?.content ?? "", /HandoffTask/);
+  assert.match(assembled[1]?.content ?? "", /SendMessage/);
+  assert.match(assembled[1]?.content ?? "", /cardAction/);
   assert.match(assembled[1]?.content ?? "", /not a private user message/i);
   assert.doesNotMatch(assembled[1]?.content ?? "", /call SendMessage to actually reply/);
 });
@@ -248,4 +248,17 @@ test("compaction preserves exactly the newest user turn and folds the previous s
   assert.equal(partition.preservedTail[0]?.role, "user");
   assert.equal(partition.preservedTail.filter((message) => message.role === "user").length, 1);
   assert.equal(partition.messagesToSummarize.some((message) => message.content.includes("generation one")), true);
+});
+
+test("long runs compact completed steps without splitting a tool exchange", () => {
+  const events: TranscriptEvent[] = [
+    { type: "user", id: "u", seq: 1, createdAt: 1, text: "Build it" },
+    { type: "assistant", id: "a", seq: 2, createdAt: 2, parts: [{ type: "tool_call", id: "c", name: "read", arguments: {} }] },
+    { type: "tool", id: "t", seq: 3, createdAt: 3, assistantId: "a", toolCallId: "c", name: "read", content: "result" },
+    { type: "assistant", id: "b", seq: 4, createdAt: 4, parts: [{ type: "text", text: "Next step" }] }
+  ];
+  const partition = partitionForCompaction(events, true);
+  assert.equal(partition?.tailFromSeq, 4);
+  assert.equal(partition?.preservedTail[0]?.id, "b");
+  assert.ok(partition?.messagesToSummarize.some(message => message.role === "tool"));
 });

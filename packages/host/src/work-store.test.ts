@@ -104,7 +104,7 @@ test("timeline projection derives chat and tasks without another stored truth", 
   const projected = projectWork(await store.readTimeline("work-1"));
   assert.equal(projected.tasks[0]!.state, "in_progress");
   assert.equal(projected.tasks[0]!.revision, 2);
-  assert.equal(projected.chat[0]!.body, "I started");
+  assert.equal(projected.chat.at(-1)!.body, "I started");
 });
 
 test("init removes a torn final line before the next append", async () => {
@@ -145,4 +145,40 @@ test("init removes a torn final line before the next append", async () => {
   assert.equal(appended.seq, 2);
   assert.equal((await reopened.readTimeline("work-1")).length, 2);
   assert.equal((await readFile(timeline, "utf8")).endsWith("\n"), true);
+});
+
+test("a complete corrupt record is reported instead of silently dropping history", async () => {
+  const { store } = await openStore();
+  await store.createWork({ id: "r", name: "Room", description: "", projectRoot: null, createdAt: 0 });
+  await appendFile(store.timelineFile("r"), '{"broken":true}\n');
+  await assert.rejects(store.readTimeline("r"), /corrupt|invalid/i);
+  await assert.rejects(store.appendEvent("r", { type: "chat.posted", id: "new", workId: "r", actor: { kind: "user", id: "u" }, createdAt: 1, body: "new", messageId: "m", mentionedAgentIds: [] }), /corrupt|invalid/i);
+});
+
+test("retry identity cannot silently accept different message content", async () => {
+  const { store } = await openStore();
+  await store.createWork({ id: "r", name: "Room", description: "", projectRoot: null, createdAt: 0 });
+  const draft = { type: "chat.posted" as const, id: "first", workId: "r", actor: { kind: "user" as const, id: "u" }, createdAt: 1, body: "first", messageId: "m", mentionedAgentIds: [], clientEventId: "request" };
+  const original = await store.appendEvent("r", draft);
+  assert.equal((await store.appendEvent("r", { ...draft, id: "retry", messageId: "other", createdAt: 2 })).seq, original.seq);
+  await assert.rejects(store.appendEvent("r", { ...draft, body: "different" }), /conflict/i);
+});
+
+test("legacy migration backs up history and records uncertainty without scheduling or rewriting it", async () => {
+  const { unlink } = await import("node:fs/promises");
+  const { store, dataDir } = await openStore();
+  await store.createWork({ id: "r", name: "Legacy", description: "", projectRoot: null, createdAt: 0 });
+  await store.appendEvent("r", { type: "chat.posted", id: "old", workId: "r", actor: { kind: "user", id: "u" }, createdAt: 1, messageId: "m", body: "Unanswered old message", mentionedAgentIds: [] });
+  await unlink(path.join(store.workDir("r"), "runtime-version.json"));
+  const before = await readFile(store.timelineFile("r"), "utf8");
+  const reopened = new WorkStore(dataDir);
+  await reopened.init();
+  await reopened.migrateExecutionHistory();
+  assert.equal(await readFile(`${store.timelineFile("r")}.pre-simplification.bak`, "utf8"), before);
+  const events = await reopened.readTimeline("r");
+  assert.equal(events[0]?.id, "old");
+  assert.equal(events[1]?.type, "history.imported");
+  assert.deepEqual(events[1]?.type === "history.imported" ? events[1].unconfirmedEventIds : [], ["old"]);
+  await reopened.migrateExecutionHistory();
+  assert.equal((await reopened.readTimeline("r")).length, 2);
 });

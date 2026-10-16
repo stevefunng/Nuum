@@ -5,6 +5,7 @@ import {
   RpcError,
   ShellDisposeParams,
   SummarizeRunParams,
+  TurnContextResult,
   TurnRunParams,
   TurnStartParams,
   TurnToolDecision,
@@ -15,12 +16,14 @@ import { JsonRpcPeer, createStdioDuplex } from "@nuum/protocol/node";
 import { ToolRegistry } from "@nuum/tools";
 import { disposeAllShells, disposePersistentShell } from "@nuum/sandbox";
 import { startTurn, type TurnHandle } from "./loop.js";
+import { selectModel } from "./model/router.js";
 import { runSummarize } from "./summarize.js";
 
 export function createKernelServer(registry = new ToolRegistry()): { peer: JsonRpcPeer; hello: KernelHello } {
   const duplex = createStdioDuplex(process.stdin, process.stdout);
   const peer = new JsonRpcPeer(duplex);
   // 键是 runId，不是 agentId —— 多个 agent 必须能同时跑，Kernel 也不认识 agent。
+  const summaries = new Map<string, AbortController>();
   const runs = new Map<string, TurnHandle>();
   const hello: KernelHello = { name: "nuum-kernel", version: "0.1.0" };
 
@@ -67,14 +70,27 @@ export function createKernelServer(registry = new ToolRegistry()): { peer: JsonR
         handle.decide(params.toolCallId, method === KernelMethods.turnDenyTool ? "deny" : params.resolution);
         return { ok: true };
       }
+      case KernelMethods.turnProvideContext: {
+        const params = TurnContextResult.parse(raw);
+        requireRun(params.runId).provideContext(params.requestId, params.messages, params.error);
+        return { ok: true };
+      }
       case KernelMethods.turnProvideToolResult: {
         const params = TurnToolResult.parse(raw);
-        requireRun(params.runId).provideToolResult(params.toolCallId, params.ok, params.output);
+        requireRun(params.runId).provideToolResult(params.toolCallId, params.ok, params.output, params.endTurn);
+        return { ok: true };
+      }
+      case KernelMethods.summarizeCancel: {
+        summaries.get(TurnRunParams.parse(raw).runId)?.abort();
         return { ok: true };
       }
       case KernelMethods.summarizeRun: {
-        // 不进 `runs`：这是一次单发调用，没有工具、不发事件、不可取消。
-        return runSummarize(SummarizeRunParams.parse(raw));
+        const params = SummarizeRunParams.parse(raw);
+        if (summaries.has(params.runId)) throw new Error("Summary already running");
+        const controller = new AbortController();
+        summaries.set(params.runId, controller);
+        try { return await runSummarize(params, { selectModel, signal: controller.signal }); }
+        finally { if (summaries.get(params.runId) === controller) summaries.delete(params.runId); }
       }
       default:
         throw new RpcError(KernelErrorCode.INVALID, `Unknown kernel method: ${method}`);

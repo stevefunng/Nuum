@@ -1,16 +1,48 @@
 .sand-agent-profile-panel { display: flex; flex-direction: column; flex: 0 0 clamp(300px, 33vw, 420px); min-width: 0; min-height: 0; background: var(--nuum-bg-editor); border-left: 1px solid var(--nuum-stroke-tertiary); box-shadow: -18px 0 40px -38px var(--nuum-shadow-primary); animation: sand-profile-enter 220ms cubic-bezier(.22,.7,.2,1); }
 .sand-agent-profile-panel > header { position: relative; display: flex; align-items: center; justify-content: center; flex: 0 0 48px; padding: 0 14px; font-size: 13px; font-weight: 500; -webkit-app-region: drag; }
 .sand-agent-profile-panel > header > button { position: absolute; right: 14px; }
-.sand-agent-profile-panel__body { display: grid; align-content: start; gap: 12px; overflow-y: auto; min-height: 0; padding: 18px 18px 22px; }
-.sand-agent-profile-panel__avatar { display: flex; justify-content: center; padding: 0 0 10px; }
-.sand-profile-field { position: relative; display: grid; gap: 5px; min-width: 0; }
-.sand-profile-field > span { color: var(--nuum-text-secondary); font-size: 11px; font-weight: 400; }
-.sand-profile-field input, .sand-profile-field textarea { box-sizing: border-box; width: 100%; padding: 8px 10px; color: var(--nuum-text-primary); background: var(--nuum-bg-elevated); border: 1px solid var(--nuum-stroke-secondary); border-radius: 9px; box-shadow: inset 0 1px 0 color-mix(in srgb, white 18%, transparent); font: inherit; font-size: 12px; line-height: 1.45; transition: border-color 150ms ease; }
-
-.sand-profile-field input:focus, .sand-profile-field textarea:focus { outline: none; border-color: var(--nuum-text-tertiary); }
-.sand-profile-field small { color: var(--nuum-text-red-primary); font-size: 10px; }
-.sand-profile-field .sand-profile-field__status { position: absolute; top: 1px; right: 0; color: var(--nuum-text-tertiary); }
-.sand-profile-field small button { color: inherit; background: transparent; border: 0; font: inherit; text-decoration: underline; cursor: pointer; }
+.sand-agent-profile-panel__body { display: grid; align-content: start; gap: 16px; overflow-y: auto; min-height: 0; padding: 18px 18px 22px; }
 .sand-agent-profile-panel + * { min-width: 0; }
 @keyframes sand-profile-enter { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
-@media (prefers-reduced-motion: reduce) { .sand-agent-profile-panel { animation: none; } .sand-profile-field input, .sand-profile-field textarea { transition: none; } }
+
+/* 银箔与细横纹是卡片本身的材质，深浅主题都保留银色印刷面。 */
+.sand-nunu-badge-stage { perspective: 900px; padding: 8px 4px 20px; }
+.sand-nunu-badge { --badge-ink: #303432; --badge-muted: #6c716e; position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: flex-start; width: 100%; min-height: 390px; padding: 28px 24px 16px; overflow: hidden; color: var(--badge-ink); text-align: left; font: inherit; background: repeating-linear-gradient(0deg, #858d8910 0, #858d8910 .5px, transparent .5px, transparent 2.5px), linear-gradient(125deg, #fafbf9, #e9ece9 55%, #f7f8f5); border: 1px solid #ffffffb0; border-radius: 12px; box-shadow: inset 0 0 0 1px #ffffff60, 0 22px 30px -22px #171f244a, 0 4px 8px -5px #171f2426; cursor: pointer; transform: rotateX(var(--badge-rx, 0deg)) rotateY(var(--badge-ry, 0deg)); }
+.sand-nunu-badge:focus-visible { outline: 2px solid var(--nuum-text-secondary); outline-offset: 4px; }
+.sand-nunu-badge__seal { position: relative; display: grid; place-items: center; align-self: center; width: 88%; aspect-ratio: 1; margin: 0 0 26px; border-radius: 50%; background: conic-gradient(from var(--badge-angle, 115deg), #c8cdca, #f7f8f6 14%, #d8dcd9 28%, #fdfefc 43%, #cdd2cf 58%, #f7f8f6 76%, #c8cdca); box-shadow: 0 12px 16px -10px #252e3038, inset 0 0 0 1px #ffffff80; }
+.sand-nunu-badge__ring { position: absolute; inset: 0; width: 100%; height: 100%; fill: var(--badge-muted); font-size: 12px; font-weight: 600; letter-spacing: .4px; }
+.sand-nunu-badge__ring circle { fill: none; stroke: #777f7840; stroke-width: .6; stroke-dasharray: 1 2; }
+.sand-nunu-badge__avatar { display: grid; place-items: center; filter: saturate(.65); }
+.sand-nunu-badge__name { position: relative; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 24px; line-height: 1.3; font-weight: 600; letter-spacing: -.7px; }
+.sand-nunu-badge__tags { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 8px; }
+.sand-nunu-badge__tags > span { color: var(--badge-muted); font-size: 10px; line-height: 1.7; }
+.sand-nunu-badge__tags > span + span::before { content: "/"; margin-right: 8px; opacity: .5; }
+.sand-nunu-badge__desc { display: -webkit-box; overflow: hidden; margin-top: 10px; color: var(--badge-muted); font-size: 11px; line-height: 1.65; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow-wrap: anywhere; }
+.sand-nunu-badge__footer { display: flex; align-items: end; justify-content: space-between; gap: 12px; width: 100%; margin-top: auto; padding-top: 24px; }
+.sand-nunu-badge__created { display: grid; gap: 4px; padding-bottom: 3px; font-size: 8px; letter-spacing: .5px; color: var(--badge-muted); }
+.sand-nunu-badge__created time { color: var(--badge-ink); font-size: 10px; font-variant-numeric: tabular-nums; letter-spacing: .8px; }
+.sand-nunu-badge__signature { width: 76px; height: 32px; fill: none; stroke: var(--badge-ink); stroke-width: 3; stroke-linecap: square; stroke-linejoin: round; }
+.sand-nunu-badge__glare { position: absolute; z-index: 1; inset: 0; pointer-events: none; border-radius: inherit; background: radial-gradient(ellipse at var(--badge-gx, 50%) var(--badge-gy, 40%), #ffffff55, transparent 65%), linear-gradient(var(--badge-angle, 115deg), transparent 20%, #deebf114 34%, #ffffff00 40%, #ffffff85 48%, #ffffffbb 50%, #faf6e947 53%, transparent 64%); background-size: 100% 100%, 240% 240%; background-position: center, var(--badge-sweep, 50%) var(--badge-gy, 40%); mix-blend-mode: soft-light; opacity: .65; transition: opacity 150ms ease; }
+.sand-nunu-badge:hover .sand-nunu-badge__glare, .sand-nunu-badge:focus-visible .sand-nunu-badge__glare { opacity: 1; }
+
+/* 「Nunu 身份」弹窗：紧凑版 WorkDialog，显式保存 / 取消。 */
+.sand-work-dialog.sand-identity-dialog { width: min(430px, calc(100vw - 48px)); padding: 20px; }
+.sand-identity-dialog > header { margin-bottom: 14px; }
+.sand-identity-dialog h2 { margin: 0; font-size: 16px; font-weight: 550; letter-spacing: -.3px; }
+.sand-identity-form { display: grid; gap: 10px; }
+.sand-identity-field { display: grid; gap: 4px; min-width: 0; }
+.sand-identity-field > span { color: var(--nuum-text-secondary); font-size: 11px; }
+.sand-identity-dialog .sand-identity-field input, .sand-identity-dialog .sand-identity-field textarea { padding: 6px 9px; font-size: 12px; border-radius: 8px; }
+.sand-identity-templates { display: grid; gap: 6px; margin-top: 2px; }
+.sand-identity-templates > span { color: var(--nuum-text-secondary); font-size: 11px; }
+.sand-identity-templates > div { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.sand-identity-dialog .sand-identity-template { display: grid; gap: 3px; justify-items: start; align-content: start; min-width: 0; min-height: 0; padding: 8px 10px; text-align: left; color: var(--nuum-text-primary); background: transparent; border: 1px solid var(--nuum-stroke-tertiary); border-radius: 9px; box-shadow: none; }
+.sand-identity-dialog .sand-identity-template:hover { color: var(--nuum-text-primary); background: var(--nuum-bg-elevated); border-color: var(--nuum-stroke-secondary); }
+.sand-identity-dialog .sand-identity-template:active { box-shadow: inset 1px 1px 3px var(--nuum-shadow-tertiary); }
+.sand-identity-template__head { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
+.sand-identity-template__head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 550; letter-spacing: -.1px; }
+.sand-identity-template small { display: -webkit-box; overflow: hidden; color: var(--nuum-text-tertiary); font-size: 10px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.sand-identity-error { margin: 0; color: var(--nuum-text-red-primary); font-size: 10px; }
+.sand-identity-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
+
+@media (prefers-reduced-motion: reduce) { .sand-agent-profile-panel { animation: none; } .sand-nunu-badge { transform: none; transition: none; } .sand-nunu-badge__glare { transition: none; } }

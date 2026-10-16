@@ -21,7 +21,7 @@ function tool(name: string, runKinds?: DelegatedTool["runKinds"]): DelegatedTool
 
 test("existing product tools are direct-only unless they opt into another domain", () => {
   const direct = tool("SendMessage");
-  const work = tool("PostToWork", ["work"]);
+  const work = tool("RunWorkCLI", ["work"]);
   const proactive = tool("ProposeAction", ["proactive"]);
   const tools = [direct, work, proactive];
 
@@ -38,7 +38,7 @@ test("existing product tools are direct-only unless they opt into another domain
       catalog: [],
       requestedBy: { kind: "user", id: "user-1" }
     }).map((item) => item.definition.name),
-    ["PostToWork"]
+    ["RunWorkCLI"]
   );
   assert.deepEqual(
     delegatedToolsForRunContext(tools, {

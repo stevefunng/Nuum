@@ -1,4 +1,5 @@
-import { mkdir, open, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { isDeepStrictEqual } from "node:util";
+import { copyFile, constants, mkdir, open, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   EMPTY_WORK_CATALOG,
@@ -10,7 +11,8 @@ import {
   type WorkChatMessage,
   type WorkEventDraft,
   type WorkProjection,
-  type WorkTask
+  type WorkTask,
+  type WorkMembership
 } from "@nuum/protocol";
 
 interface WorkRecord {
@@ -20,6 +22,7 @@ interface WorkRecord {
 }
 
 export class WorkStore {
+  private readonly memberships = new Map<string, Map<string, WorkMembership>>();
   private readonly works = new Map<string, WorkRecord>();
   private readonly appendChains = new Map<string, Promise<unknown>>();
 
@@ -28,11 +31,13 @@ export class WorkStore {
   async init(): Promise<void> {
     await mkdir(this.worksRoot(), { recursive: true });
     this.works.clear();
+    this.memberships.clear();
     for (const id of await readdir(this.worksRoot())) {
       const profile = await readJson(path.join(this.workDir(id), "profile.json"), WorkProfile);
       if (!profile) continue;
       await repairFinalLine(this.timelineFile(id));
       const events = await this.readTimeline(id);
+      for (const event of events) this.projectMembership(event);
       const tail = events.at(-1);
       this.works.set(id, {
         profile,
@@ -40,6 +45,71 @@ export class WorkStore {
         lastActivityAt: Math.max(profile.createdAt, tail?.createdAt ?? 0)
       });
     }
+  }
+
+  /** Preserve the previous log before switching recovery semantics. No old work is replayed blindly. */
+  async migrateExecutionHistory(): Promise<void> {
+    for (const work of this.listWorks()) {
+      const marker = path.join(this.workDir(work.id), "runtime-version.json");
+      try {
+        const version = JSON.parse(await readFile(marker, "utf8"));
+        if (version.version !== 2) throw new Error("Unsupported room runtime version");
+        continue;
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      const events = await this.readTimeline(work.id);
+      if (events.length && !events.some(event => event.type === "history.imported")) {
+        for (const file of [this.timelineFile(work.id), path.join(this.workDir(work.id), "cursors.json")]) {
+          try { await copyFile(file, `${file}.pre-simplification.bak`, constants.COPYFILE_EXCL); }
+          catch (error) { if (!["ENOENT", "EEXIST"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error; }
+        }
+        const claimed = new Set(events.flatMap(event => event.type === "dispatch.requested" ? [event.causationId, event.discussion?.rootId] : event.type === "discussion.started" ? event.triggerEventIds : event.type === "execution.started" || event.type === "execution.finished" ? [event.sourceEventId] : []));
+        const uncertain = events.filter(event => !claimed.has(event.id) && ((event.type === "chat.posted" && event.actor.kind === "user") || ["task.delegated", "task.handed_off", "task.transitioned"].includes(event.type)));
+        await this.appendEvent(work.id, { type: "history.imported", id: crypto.randomUUID(), workId: work.id, createdAt: Date.now(), actor: { kind: "system", id: "migration" }, unconfirmedEventIds: uncertain.map(event => event.id) });
+      }
+      await writeJsonAtomic(marker, { version: 2 });
+    }
+  }
+
+  membership(workId: string, agentId: string): WorkMembership {
+    return structuredClone(this.memberships.get(workId)?.get(agentId) ?? { revision: 0, binding: null });
+  }
+
+  membershipsFor(agentId: string): Record<string, WorkMembership> {
+    return Object.fromEntries([...this.memberships].flatMap(([workId, members]) => {
+      const member = members.get(agentId);
+      return member ? [[workId, structuredClone(member)]] : [];
+    }));
+  }
+
+  private projectMembership(event: WorkEvent): void {
+    if (event.type !== "member.attached" && event.type !== "member.detached") return;
+    const members = this.memberships.get(event.workId) ?? new Map<string, WorkMembership>();
+    members.set(event.agentId, { revision: event.membershipRevision, binding: event.type === "member.detached" ? null : {
+      workId: event.workId, role: event.role, joinedAt: event.createdAt,
+      grants: { canPost: event.role !== "observer", canManageOwnTasks: event.role !== "observer", canAssignTasks: event.role !== "observer", canEditCatalog: event.role === "coordinator" }
+    } });
+    this.memberships.set(event.workId, members);
+  }
+
+  /** One-time reconciliation uses V1 settings as truth, then Room events take over. */
+  async migrateMemberships(agents: { profile: { id: string }; settings: { workMembership?: WorkMembership } }[]): Promise<void> {
+    const marker = path.join(this.dataDir, "room-memberships-v2.json");
+    try { await readFile(marker); return; } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    for (const agent of agents) {
+      const legacy = agent.settings.workMembership?.binding;
+      for (const work of this.listWorks()) {
+        const current = this.membership(work.id, agent.profile.id);
+        const desired = legacy?.workId === work.id ? legacy : null;
+        if (!!current.binding === !!desired && (!desired || current.binding?.role === desired.role)) continue;
+        await this.appendEvent(work.id, {
+          id: crypto.randomUUID(), workId: work.id, createdAt: Date.now(), actor: { kind: "system", id: "migration" },
+          membershipOperationId: `v2:${agent.profile.id}:${work.id}`, agentId: agent.profile.id,
+          membershipRevision: current.revision + 1,
+          ...(desired ? { type: "member.attached", role: desired.role } : { type: "member.detached" })
+        });
+      }
+    }
+    await writeJsonAtomic(marker, { version: 2 });
   }
 
   private worksRoot(): string {
@@ -60,6 +130,7 @@ export class WorkStore {
     await mkdir(this.workDir(parsed.id), { recursive: true });
     await writeJsonAtomic(path.join(this.workDir(parsed.id), "profile.json"), parsed);
     await writeJsonAtomic(path.join(this.workDir(parsed.id), "catalog.json"), EMPTY_WORK_CATALOG);
+    await writeJsonAtomic(path.join(this.workDir(parsed.id), "runtime-version.json"), { version: 2 });
     this.works.set(parsed.id, {
       profile: parsed,
       lastSeq: 0,
@@ -78,12 +149,14 @@ export class WorkStore {
     return this.requireWork(id).profile;
   }
 
-  async updateWork(id: string, patch: Partial<Pick<WorkProfile, "name" | "description" | "projectRoot">>): Promise<WorkProfile> {
+  async updateWork(id: string, patch: Partial<Pick<WorkProfile, "name" | "description" | "projectRoot" | "kind">>): Promise<WorkProfile> {
+    return this.chain(id, async () => {
     const current = this.requireWork(id);
     const profile = WorkProfile.parse({ ...current.profile, ...patch, id: current.profile.id });
     await writeJsonAtomic(path.join(this.workDir(id), "profile.json"), profile);
     this.works.set(id, { ...current, profile });
     return profile;
+    });
   }
 
   requireWork(id: string): WorkRecord {
@@ -122,18 +195,41 @@ export class WorkStore {
     });
   }
 
-  appendEvent(id: string, draft: WorkEventDraft): Promise<WorkEvent> {
+  appendEvent(id: string, draft: WorkEventDraft, expected?: { taskId: string; revision: number }): Promise<WorkEvent> {
     return this.chain(id, async () => {
       const record = this.requireWork(id);
+      const events = await this.readTimelineFile(id);
+      if ((events.at(-1)?.seq ?? 0) !== record.lastSeq) throw new Error("Invalid room commit boundary; reopen the store before writing");
+      if (draft.clientEventId || expected) {
+        const duplicate = draft.clientEventId ? events.find((event) => event.clientEventId === draft.clientEventId) : undefined;
+        if (duplicate) {
+          const content = (event: WorkEventDraft | WorkEvent) => {
+            const { id: _id, createdAt: _at, ...rest } = event;
+            const body = { ...rest } as Record<string, unknown>;
+            delete body.seq; delete body.messageId;
+            return JSON.parse(JSON.stringify(body));
+          };
+          if (!isDeepStrictEqual(content(duplicate), content(draft))) throw new RpcError(HostErrorCode.WORK_CONFLICT, "Request identity conflicts with previously committed content");
+          return duplicate;
+        }
+        if (expected && projectWork(events).tasks.find((task) => task.id === expected.taskId)?.revision !== expected.revision) {
+          throw new RpcError(HostErrorCode.WORK_CONFLICT, "Task revision changed; read the task and retry");
+        }
+      }
+      if ((draft.type === "member.attached" || draft.type === "member.detached") && draft.membershipRevision !== this.membership(id, draft.agentId).revision + 1) {
+        throw new RpcError(HostErrorCode.WORK_CONFLICT, "Membership revision changed; refresh and retry");
+      }
       if (draft.workId !== id) throw new Error(`Work event ${draft.id} belongs to ${draft.workId}, not ${id}`);
       const event = WorkEvent.parse({ ...draft, seq: record.lastSeq + 1 });
       await mkdir(this.workDir(id), { recursive: true });
       const handle = await open(this.timelineFile(id), "a");
       try {
         await handle.writeFile(`${JSON.stringify(event)}\n`);
+        await handle.sync();
       } finally {
         await handle.close();
       }
+      this.projectMembership(event);
       this.works.set(id, {
         ...record,
         lastSeq: event.seq,
@@ -143,18 +239,21 @@ export class WorkStore {
     });
   }
 
-  async readTimeline(id: string): Promise<WorkEvent[]> {
+  readTimeline(id: string): Promise<WorkEvent[]> {
+    // A reader must not observe a partially written append or a not-yet-synced head.
+    return this.chain(id, () => this.readTimelineFile(id));
+  }
+
+  private async readTimelineFile(id: string): Promise<WorkEvent[]> {
     let raw: string;
-    try {
-      raw = await readFile(this.timelineFile(id), "utf8");
-    } catch {
-      return [];
-    }
+    try { raw = await readFile(this.timelineFile(id), "utf8"); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
+    if (raw && !raw.endsWith("\n")) throw new Error(`Corrupt room ${id}: unterminated log record; restart for tail recovery`);
     const events: WorkEvent[] = [];
-    for (const line of raw.split("\n")) {
-      if (!line.trim()) continue;
-      const parsed = parseWorkEvent(line);
-      if (parsed) events.push(parsed);
+    for (const line of raw.split("\n").slice(0, -1)) {
+      const event = parseWorkEvent(line);
+      if (!event || event.workId !== id || event.seq !== events.length + 1) throw new Error(`Corrupt room ${id}: invalid record at sequence ${events.length + 1}`);
+      events.push(event);
     }
     return events;
   }
@@ -165,8 +264,8 @@ export class WorkStore {
     let preview: string | undefined;
     for (const event of await this.readTimeline(id)) {
       lastActivityAt = Math.max(lastActivityAt, event.createdAt);
-      if (event.type === "chat.posted") {
-        const text = event.body.replace(/\s+/g, " ").trim().slice(0, 160);
+      if (event.type === "chat.posted" || (event.type === "task.handed_off" && event.messageId)) {
+        const text = (event.type === "chat.posted" ? event.body : event.summary).replace(/\s+/g, " ").trim().slice(0, 160);
         if (text) preview = text;
       }
     }
@@ -192,7 +291,15 @@ export function projectWork(events: WorkEvent[]): WorkProjection {
       continue;
     }
     if (event.type === "task.created") {
-      if (!tasks.has(event.task.id)) tasks.set(event.task.id, structuredClone(event.task));
+      if (!tasks.has(event.task.id)) tasks.set(event.task.id, { ...structuredClone(event.task), ...(event.actor.kind === "agent" ? { ownerAgentId: event.actor.id } : {}) });
+      continue;
+    }
+    if (event.type === "task.claimed") {
+      const task = tasks.get(event.taskId);
+      if (!task || event.revision <= task.revision) continue;
+      const { blocker: _blocker, ...rest } = task;
+      tasks.set(event.taskId, { ...rest, assigneeIds: event.assigneeIds, state: "in_progress", revision: event.revision, updatedAt: event.createdAt });
+      chat.push({ ...event, type: "chat.posted", mentionedAgentIds: [] });
       continue;
     }
     if (event.type === "task.assigned") {
@@ -206,9 +313,17 @@ export function projectWork(events: WorkEvent[]): WorkProjection {
       });
       continue;
     }
+    if (event.type === "task.delegated") {
+      const task = tasks.get(event.taskId);
+      if (!task || event.revision <= task.revision) continue;
+      tasks.set(event.taskId, { ...task, state: "in_progress", assigneeIds: [...new Set([...task.assigneeIds, event.agentId])], revision: event.revision, updatedAt: event.createdAt });
+      chat.push({ ...event, type: "chat.posted", body: `Worker assigned: ${event.agentId}\n${event.instruction}`, mentionedAgentIds: [] });
+      continue;
+    }
     if (event.type === "task.transitioned") {
       const task = tasks.get(event.taskId);
       if (!task || task.state !== event.from || event.revision <= task.revision) continue;
+      chat.push({ ...event, type: "chat.posted", messageId: event.id, body: `Card ${task.title}: ${event.from} → ${event.to}${event.blocker ? `\n${event.blocker.reason}` : ""}`, mentionedAgentIds: [] });
       const { blocker: _previousBlocker, ...withoutBlocker } = task;
       tasks.set(event.taskId, {
         ...withoutBlocker,
@@ -222,6 +337,11 @@ export function projectWork(events: WorkEvent[]): WorkProjection {
       continue;
     }
     if (event.type === "task.handed_off") {
+      if (event.messageId) chat.push({
+        ...event, type: "chat.posted", messageId: event.messageId,
+        body: event.blockerReason ? `${event.summary}\n\nBlocked: ${event.blockerReason}` : event.summary,
+        mentionedAgentIds: [], taskId: event.taskId
+      });
       const task = tasks.get(event.taskId);
       if (!task || event.revision <= task.revision) continue;
       const { blocker: _previousBlocker, ...withoutBlocker } = task;
@@ -253,14 +373,17 @@ async function repairFinalLine(file: string): Promise<void> {
   let raw: string;
   try {
     raw = await readFile(file, "utf8");
-  } catch {
-    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
   }
   if (!raw || raw.endsWith("\n")) return;
   const lastBreak = raw.lastIndexOf("\n");
   const tail = raw.slice(lastBreak + 1);
   const repaired = parseWorkEvent(tail) ? `${raw}\n` : raw.slice(0, lastBreak + 1);
-  await writeFile(file, repaired);
+  await writeFile(`${file}.recovery-${crypto.randomUUID()}.bak`, raw);
+  const handle = await open(file, "w");
+  try { await handle.writeFile(repaired); await handle.sync(); } finally { await handle.close(); }
 }
 
 async function readJson<T>(

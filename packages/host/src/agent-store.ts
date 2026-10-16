@@ -250,16 +250,17 @@ export class AgentStore {
   appendEvent(id: string, draft: TranscriptDraft): Promise<TranscriptEvent> {
     return this.chain(id, async () => {
       const tail = await this.loadTail(id);
-      tail.lastSeq += 1;
-      const event = { ...draft, seq: tail.lastSeq } as TranscriptEvent;
+      const event = { ...draft, seq: tail.lastSeq + 1 } as TranscriptEvent;
       const file = this.transcriptPath(id);
       await mkdir(path.dirname(file), { recursive: true });
       const handle = await open(file, "a");
       try {
         await handle.writeFile(`${JSON.stringify(event)}\n`);
+        await handle.sync();
       } finally {
         await handle.close();
       }
+      tail.lastSeq = event.seq;
       tail.lastEventAt = event.createdAt;
       const record = this.agents.get(id);
       if (record) {

@@ -86,9 +86,9 @@ class FakeKernel implements KernelClient {
  * 轮询等条件成立，而不是猜「几个 setImmediate 够了」。
  */
 async function waitFor(predicate: () => boolean | Promise<boolean>, what: string): Promise<void> {
-  for (let i = 0; i < 200; i += 1) {
+  for (const deadline = Date.now() + 3000; Date.now() < deadline;) {
     if (await predicate()) return;
-    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setTimeout(resolve, 2));
   }
   assert.fail(`timed out waiting for ${what}`);
 }
@@ -1255,13 +1255,13 @@ test("the user message lands on disk before the run is even scheduled", async (t
 });
 
 test("an oversized active context is compacted without rewriting transcript history", async (t) => {
-  const harness = await openHarness(t, { contextWindowTokens: 100 });
+  const harness = await openHarness(t, { contextWindowTokens: 12000 });
   const id = (await harness.runtime.createAgent({ name: "Alpha" })).profile.id;
   await harness.runtime.store.appendEvent(id, {
-    type: "user", id: "old-user", text: "x".repeat(800), createdAt: 1
+    type: "user", id: "old-user", text: "x".repeat(40_000), createdAt: 1
   });
   await harness.runtime.store.appendEvent(id, {
-    type: "assistant", id: "old-answer", parts: [{ type: "text", text: "y".repeat(800) }], createdAt: 2
+    type: "assistant", id: "old-answer", parts: [{ type: "text", text: "y".repeat(40_000) }], createdAt: 2
   });
   const file = path.join(harness.dataDir, "agents", id, "transcript.jsonl");
   const before = await readFile(file, "utf8");
@@ -1283,7 +1283,7 @@ test("an oversized active context is compacted without rewriting transcript hist
   assert.equal(started[0]!.content.includes("Earlier conversation was summarized"), true);
 });
 
-test("a compaction failure does not block the user's turn", async (t) => {
+test("a compaction failure pauses without sending an oversized model request", async (t) => {
   const harness = await openHarness(t, { contextWindowTokens: 100 });
   const id = (await harness.runtime.createAgent({ name: "Alpha" })).profile.id;
   await harness.runtime.store.appendEvent(id, {
@@ -1296,9 +1296,48 @@ test("a compaction failure does not block the user's turn", async (t) => {
     throw new Error("summary unavailable");
   };
 
-  await harness.send(id, "still run this");
-
-  assert.equal(harness.kernel.started.length, 1);
-  assert.equal(harness.kernel.started[0]!.messages.some((message) => message.content.includes("still run this")), true);
+  await assert.rejects(harness.send(id, "still run this"), /compaction failed/i);
+  assert.equal(harness.kernel.started.length, 0);
+  assert.equal(harness.kernel.summarized.length, 2);
   assert.equal((await harness.runtime.store.readTranscript(id)).some((event) => event.type === "compact"), false);
+});
+
+test("background compaction preserves events appended while the summary is pending", async (t) => {
+  const harness = await openHarness(t, { contextWindowTokens: 20000 });
+  const id = (await harness.runtime.createAgent({ name: "Background" })).profile.id;
+  await harness.runtime.store.appendEvent(id, { type: "user", id: "old", text: "old task", createdAt: 1 });
+  await harness.runtime.store.appendEvent(id, { type: "assistant", id: "old-result", parts: [{ type: "text", text: "old result" }], createdAt: 2 });
+  const run = await harness.send(id, "current request must survive");
+  const replies: import("@nuum/protocol").TurnContextResult[] = [];
+  (harness.kernel as KernelClient).provideContext = async result => { replies.push(result); };
+  let release!: (value: SummarizeRunResult) => void;
+  harness.kernel.summarize = async () => new Promise(resolve => { release = resolve; });
+  harness.kernel.emit("turn.context", { runId: run.runId, requestId: "prepare", usedTokens: 16200 });
+  await waitFor(() => replies.length === 1 && !!release, "background started without blocking");
+  assert.equal(replies[0]!.messages, undefined);
+  await harness.runtime.store.appendEvent(id, { type: "assistant", id: "new-result", parts: [{ type: "text", text: "result produced during summary" }], createdAt: 3 });
+  release({ text: "old task summary" });
+  harness.kernel.emit("turn.context", { runId: run.runId, requestId: "apply", usedTokens: 17500 });
+  await waitFor(() => replies.length === 2, "summary applied");
+  assert.ok(replies[1]!.messages?.some(message => message.content.includes("result produced during summary")));
+  assert.ok(replies[1]!.messages?.some(message => message.content.includes("current request must survive")));
+  assert.equal((await harness.runtime.store.readTranscript(id)).filter(event => event.type === "compact").length, 1);
+});
+
+test("a cancelled run cannot commit its late background summary", async (t) => {
+  const harness = await openHarness(t, { contextWindowTokens: 20000 });
+  const id = (await harness.runtime.createAgent({ name: "Cancel" })).profile.id;
+  await harness.runtime.store.appendEvent(id, { type: "user", id: "old", text: "old task", createdAt: 1 });
+  await harness.runtime.store.appendEvent(id, { type: "assistant", id: "old-result", parts: [{ type: "text", text: "old result" }], createdAt: 2 });
+  const run = await harness.send(id, "current");
+  const replies: import("@nuum/protocol").TurnContextResult[] = [];
+  (harness.kernel as KernelClient).provideContext = async result => { replies.push(result); };
+  let release!: (value: SummarizeRunResult) => void;
+  harness.kernel.summarize = async () => new Promise(resolve => { release = resolve; });
+  harness.kernel.emit("turn.context", { runId: run.runId, requestId: "prepare", usedTokens: 16200 });
+  await waitFor(() => replies.length === 1 && !!release, "summary pending");
+  await harness.runtime.cancel(id);
+  release({ text: "late summary" });
+  await quiet();
+  assert.equal((await harness.runtime.store.readTranscript(id)).some(event => event.type === "compact"), false);
 });

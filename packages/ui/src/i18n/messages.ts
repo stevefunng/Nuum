@@ -1,4 +1,46 @@
 export const messages: Record<string, Record<"zh-CN" | "en", string>> = {
+  "Run failed": { "zh-CN": "执行出错", "en": "Run failed" },
+  "Discussing": { "zh-CN": "正在讨论", "en": "Discussing" },
+  "Working in another session": { "zh-CN": "正在其他会话工作", "en": "Working in another session" },
+  "Idle": { "zh-CN": "空闲", "en": "Idle" },
+  "Error": { "zh-CN": "出错", "en": "Error" },
+  "Working on card": { "zh-CN": "正在处理卡片", "en": "Working on card" },
+  "Ready for the next task": { "zh-CN": "空闲，等待下一项任务", "en": "Ready for the next task" },
+  "Last run failed": { "zh-CN": "上次执行出错，请检查执行记录", "en": "Last run failed; check the execution trace" },
+  "Participating in this discussion": { "zh-CN": "正在参与本群讨论", "en": "Participating in this discussion" },
+  "Working outside this room": { "zh-CN": "正在处理其他会话的工作", "en": "Working outside this room" },
+  "Status of {name}": { "zh-CN": "{name} 的当前状态", "en": "Status of {name}" },
+  "Participated in room: {name}": { "zh-CN": "参与群聊：{name}", "en": "Participated in room: {name}" },
+  "Stop discussion": { "zh-CN": "停止讨论", "en": "Stop discussion" },
+  "Continue": { "zh-CN": "继续", "en": "Continue" },
+  "Use less room history": { "zh-CN": "选择较短的群聊上下文", "en": "Use less room history" },
+  "Only include the most recent messages": { "zh-CN": "仅包含最近的消息条数", "en": "Only include the most recent messages" },
+  "Continue with this history": { "zh-CN": "仅用这些消息继续", "en": "Continue with this history" },
+  "Discussion interrupted. Continue starts a new bounded discussion.": { "zh-CN": "讨论已中断。点击继续将开启新一轮讨论。", "en": "Discussion interrupted. Continue starts a new bounded discussion." },
+  "Execution interrupted. Check tools and published results before continuing.": { "zh-CN": "执行已中断。请核对已执行的操作和已发布的结果，再继续。", "en": "Execution interrupted. Check tools and published results before continuing." },
+  "Execution failed. Check the result before continuing.": { "zh-CN": "执行失败，请检查结果后继续。", "en": "Execution failed. Check the result before continuing." },
+  "Card execution ended without a handoff. Continue or cancel the card.": { "zh-CN": "本轮执行已结束，但尚未提交卡片结果。可继续执行或取消卡片。", "en": "Card execution ended without a handoff. Continue or cancel the card." },
+  "Legacy execution requires confirmation before continuing.": { "zh-CN": "旧版本执行记录已保留，确认后才能继续。", "en": "Legacy execution requires confirmation before continuing." },
+  "Previous room history is preserved. Continue only if this discussion still needs a response.": { "zh-CN": "旧房间记录已保留。如仍需回应，可点击继续。", "en": "Previous room history is preserved. Continue only if this discussion still needs a response." },
+  "Room context is too large. No new room input was consumed; narrow the history range before continuing.": { "zh-CN": "群聊上下文过长，尚未加入新的历史。请选择较短的群聊上下文后继续。", "en": "Room context is too large. No new room input was consumed; narrow the history range before continuing." },
+  "Local room": { "zh-CN": "本地群聊", "en": "Local room" },
+  "Enable task board": { "zh-CN": "升级为 NunuBar", "en": "Enable task board" },
+  "Card owner": { "zh-CN": "卡片负责人", "en": "Card owner" },
+  "Workers": { "zh-CN": "执行成员", "en": "Workers" },
+  "Choose worker": { "zh-CN": "选择执行 Nunu", "en": "Choose worker" },
+  "This card is paused until you confirm how to proceed.": { "zh-CN": "卡片已暂停，等待你确认后继续。", "en": "This card is paused until you confirm how to proceed." },
+  "Confirm and resume": { "zh-CN": "确认并恢复", "en": "Confirm and resume" },
+  "Cancel task": { "zh-CN": "取消卡片", "en": "Cancel task" },
+  "Accept delivery": { "zh-CN": "验收通过", "en": "Accept delivery" },
+  "Request changes": { "zh-CN": "退回修改", "en": "Request changes" },
+  "Execution history": { "zh-CN": "执行记录", "en": "Execution history" },
+  "No execution history yet.": { "zh-CN": "还没有执行记录。", "en": "No execution history yet." },
+  "Load earlier": { "zh-CN": "加载更早记录", "en": "Load earlier" },
+  "A room response failed. Check the model settings and dispatch again.": { "zh-CN": "有一轮房间回应失败，请检查模型设置后重新派工。", "en": "A room response failed. Check the model settings and dispatch again." },
+  "Created on": {
+    "zh-CN": "创建日期",
+    "en": "Created on"
+  },
   "Or type your own answer…": {
     "zh-CN": "或直接输入你的回答…",
     "en": "Or type your own answer…"
@@ -27,21 +69,41 @@ export const messages: Record<string, Record<"zh-CN" | "en", string>> = {
     "zh-CN": "已保存",
     "en": "Saved"
   },
-  "Agent profile": {
-    "zh-CN": "Nunu 资料",
-    "en": "Nunu profile"
+  "Nunu identity": {
+    "zh-CN": "Nunu 身份",
+    "en": "Nunu identity"
+  },
+  "Recommended templates": {
+    "zh-CN": "推荐模板",
+    "en": "Recommended templates"
+  },
+  "Research, sources": {
+    "zh-CN": "研究、资料",
+    "en": "Research, sources"
+  },
+  "Projects, follow-ups": {
+    "zh-CN": "项目、跟进",
+    "en": "Projects, follow-ups"
+  },
+  "Daily tasks, reminders": {
+    "zh-CN": "日常事务、提醒",
+    "en": "Daily tasks, reminders"
   },
   "Edit profile": {
     "zh-CN": "编辑资料",
     "en": "Edit profile"
   },
+  "Click to edit profile": {
+    "zh-CN": "点击编辑资料",
+    "en": "Click to edit profile"
+  },
+  "Finish": {
+    "zh-CN": "完成",
+    "en": "Finish"
+  },
   "Close profile": {
     "zh-CN": "收起资料栏",
     "en": "Close profile"
-  },
-  "Nunu settings": {
-    "zh-CN": "设置",
-    "en": "Settings"
   },
   "Open {name} profile": {
     "zh-CN": "打开 {name} 的资料",

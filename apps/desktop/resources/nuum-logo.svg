@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-15 -15 259 259" role="img" aria-labelledby="title desc">
+  <title id="title">Nuum logo</title>
+  <desc id="desc">The green blob Nunu character used by Nuum, with two tilted white eyes.</desc>
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#00c972"/>
+      <stop offset="1" stop-color="#009957"/>
+    </linearGradient>
+  </defs>
+  <path d="M114 4C170 4 224 42 224 106C224 171 181 224 112 224C48 224 4 184 4 116C4 55 48 4 114 4Z" fill="url(#body)"/>
+  <ellipse cx="86" cy="106" rx="10" ry="16" fill="#fff" transform="rotate(14 86 106)"/>
+  <ellipse cx="142" cy="106" rx="10" ry="16" fill="#fff" transform="rotate(14 142 106)"/>
+</svg>

@@ -28,7 +28,15 @@ export const WakeSource = z.discriminatedUnion("kind", [
     workId: z.string(),
     workName: z.string(),
     bridgeId: z.string(),
-    taskId: z.string().optional()
+    taskId: z.string().optional(),
+    roomInput: z.object({
+      membershipRevision: z.number().int(),
+      fromSeq: z.number().int(),
+      throughSeq: z.number().int(),
+      messageIds: z.array(z.string()),
+      epoch: z.number().int().nonnegative().optional(),
+      mode: z.enum(["background", "continuation"]).optional()
+    }).optional()
   }),
   // 本版不产生，占位给下版的定时唤醒。
   z.object({ kind: z.literal("routine"), routineId: z.string(), routineName: z.string() })
@@ -179,7 +187,9 @@ export const TranscriptEvent = z.discriminatedUnion("type", [
     throughSeq: z.number().int(),
     /** 保留尾部从这个 seq 起（含）。 */
     tailFromSeq: z.number().int(),
-    summary: z.string()
+    summary: z.string(),
+    activeRequest: z.string().optional(),
+    roomInputs: z.array(z.object({ workId: z.string(), membershipRevision: z.number().int(), throughSeq: z.number().int() })).optional()
   }),
   z.object({
     type: z.literal("profile"),
@@ -432,7 +442,7 @@ export function projectAgent(
           priority: event.source.priority ?? false
         });
       } else {
-        blocks.push({ type: "notice", id: event.id, kind: "wake", text: describeWake(event) });
+        blocks.push({ type: "notice", id: event.id, kind: "wake", text: event.source.kind === "work" ? `Participated in room: ${event.source.workName}` : describeWake(event) });
       }
       continue;
     }

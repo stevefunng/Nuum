@@ -15,7 +15,7 @@ export class AnthropicModel implements ModelPort {
       },
       body: JSON.stringify({
         model: req.model.model,
-        max_tokens: 4096,
+        max_tokens: req.maxOutputTokens ?? 4096,
         stream: true,
         system: system || undefined,
         messages: toAnthropicMessages(req.messages.filter((message) => message.role !== "system")),

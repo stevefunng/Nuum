@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const WorkProfile = z.object({
+  kind: z.enum(["room", "work"]).optional(),
   id: z.string().min(1),
   name: z.string().min(1),
   description: z.string(),
@@ -75,6 +76,7 @@ export const WorkTask = z.object({
   description: z.string(),
   acceptanceCriteria: z.array(z.string()),
   state: WorkTaskState,
+  ownerAgentId: z.string().min(1).optional(),
   assigneeIds: z.array(z.string()),
   dependencyIds: z.array(z.string()),
   priority: WorkTaskPriority,
@@ -149,15 +151,28 @@ export const WorkEvent = z.discriminatedUnion("type", [
   EventBase.extend({
     type: z.literal("chat.posted"),
     messageId: z.string().min(1),
+    inputAfterSeq: z.number().int().nonnegative().optional(),
     body: z.string().min(1),
-    mentionedAgentIds: z.array(z.string())
+    mentionedAgentIds: z.array(z.string()),
+    sourceSessionId: z.string().optional(),
+    taskId: z.string().optional()
   }),
   EventBase.extend({ type: z.literal("task.created"), task: WorkTask }),
+  EventBase.extend({
+    type: z.literal("task.claimed"), taskId: z.string().min(1), assigneeIds: z.array(z.string()),
+    revision: z.number().int().positive(), messageId: z.string().min(1), body: z.string(),
+    sourceSessionId: z.string().optional()
+  }),
   EventBase.extend({
     type: z.literal("task.assigned"),
     taskId: z.string().min(1),
     assigneeIds: z.array(z.string()),
     revision: z.number().int().positive()
+  }),
+  EventBase.extend({
+    type: z.literal("task.delegated"), taskId: z.string(), agentId: z.string(), instruction: z.string().min(1),
+    revision: z.number().int().positive(), messageId: z.string(),
+    membershipRevision: z.number().int().positive()
   }),
   EventBase.extend({
     type: z.literal("task.transitioned"),
@@ -181,22 +196,59 @@ export const WorkEvent = z.discriminatedUnion("type", [
     taskId: z.string().min(1),
     summary: z.string().min(1),
     deliverables: z.array(WorkDeliverable),
-    nextStatus: z.enum(["review", "blocked", "done"]),
+    nextStatus: z.enum(["in_progress", "review", "blocked", "done"]),
+    returnToAgentId: z.string().optional(),
     blockerReason: z.string().min(1).optional(),
-    revision: z.number().int().positive()
+    revision: z.number().int().positive(),
+    messageId: z.string().optional(),
+    sourceSessionId: z.string().optional()
   }),
+  EventBase.extend({ type: z.literal("history.imported"), unconfirmedEventIds: z.array(z.string()) }),
+  // Business requests and execution evidence; no persisted discussion program counter.
+  EventBase.extend({
+    type: z.literal("work.requested"), agentId: z.string(), taskId: z.string().optional(),
+    instruction: z.string().min(1), membershipRevision: z.number().int(),
+    resumesExecutionId: z.string().optional(), inputAfterSeq: z.number().int().nonnegative().optional()
+  }),
+  EventBase.extend({
+    type: z.literal("execution.started"), executionId: z.string(), sourceEventId: z.string(),
+    agentId: z.string(), taskId: z.string().optional(), sessionId: z.string(),
+    runId: z.string(), membershipRevision: z.number().int()
+  }),
+  EventBase.extend({
+    type: z.literal("execution.finished"), executionId: z.string(), sourceEventId: z.string(),
+    agentId: z.string(), taskId: z.string().optional(),
+    status: z.enum(["completed", "failed", "cancelled"]), error: z.string().optional()
+  }),
+  EventBase.extend({
+    type: z.literal("discussion.started"), triggerEventIds: z.array(z.string()).min(1)
+  }),
+  EventBase.extend({
+    type: z.literal("discussion.finished"), discussionId: z.string(),
+    status: z.enum(["completed", "cancelled", "interrupted"]), error: z.string().optional()
+  }),
+  // Read-only compatibility with older timelines.
   EventBase.extend({
     type: z.literal("dispatch.requested"),
     bridgeId: z.string().min(1),
     agentId: z.string().min(1),
     taskId: z.string().optional(),
-    instruction: z.string().min(1)
+    instruction: z.string().min(1),
+    membershipRevision: z.number().int().optional(),
+    discussion: z.object({ rootId: z.string(), round: z.number().int(), order: z.array(z.string()), index: z.number().int() }).optional()
   }),
   EventBase.extend({
     type: z.literal("dispatch.acknowledged"),
     bridgeId: z.string().min(1),
     agentId: z.string().min(1),
     transcriptEventId: z.string().min(1)
+  }),
+  EventBase.extend({
+    type: z.literal("dispatch.finished"),
+    bridgeId: z.string().min(1),
+    agentId: z.string().min(1),
+    status: z.enum(["completed", "failed", "cancelled"]),
+    error: z.string().optional()
   }),
   EventBase.extend({
     type: z.literal("member.attached"),

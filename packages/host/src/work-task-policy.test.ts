@@ -2,21 +2,18 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { allowedTaskTransitions, assertTaskTransition } from "./work-task-policy.js";
 
-test("blocked can resume, return to ready, or be cancelled", () => {
-  assert.deepEqual(allowedTaskTransitions("blocked", "worker"), ["in_progress"]);
-  assert.deepEqual(allowedTaskTransitions("blocked", "coordinator"), [
-    "in_progress",
-    "ready",
-    "cancelled"
-  ]);
+test("only a human can resume a blocked card", () => {
+  assert.deepEqual(allowedTaskTransitions("blocked", "worker"), []);
+  assert.deepEqual(allowedTaskTransitions("blocked", "coordinator"), ["cancelled"]);
+  assert.deepEqual(allowedTaskTransitions("blocked", "user"), ["in_progress", "ready", "cancelled"]);
 });
 
-test("only a user or coordinator can mark review as done", () => {
+test("only a human can accept the final delivery", () => {
   assert.throws(
     () => assertTaskTransition("review", "done", "worker"),
     /not allowed/i
   );
-  assert.doesNotThrow(() => assertTaskTransition("review", "done", "coordinator"));
+  assert.throws(() => assertTaskTransition("review", "done", "coordinator"), /not allowed/i);
   assert.doesNotThrow(() => assertTaskTransition("review", "done", "user"));
 });
 

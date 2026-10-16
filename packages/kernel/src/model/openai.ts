@@ -17,6 +17,7 @@ export class OpenAIModel implements ModelPort {
       body: JSON.stringify({
         model: req.model.model,
         stream: true,
+        ...(req.maxOutputTokens ? { max_tokens: req.maxOutputTokens } : {}),
         messages: req.messages.map((message) => toOpenAIMessage(message, this.label !== "DeepSeek")),
         tools: req.tools.map((tool) => ({
           type: "function",

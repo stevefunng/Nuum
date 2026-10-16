@@ -8,6 +8,7 @@ import {
   type SummarizeRunResult,
   type TurnStartParams,
   type TurnToolDecision,
+  type TurnContextResult,
   type TurnToolResult
 } from "@nuum/protocol";
 import { JsonRpcPeer, createStdioDuplex } from "@nuum/protocol/node";
@@ -17,11 +18,14 @@ export interface KernelClient {
   start(params: TurnStartParams): Promise<unknown>;
   cancel(runId: string): Promise<unknown>;
   decide(params: TurnToolDecision, deny?: boolean): Promise<unknown>;
+  provideContext?(params: TurnContextResult): Promise<unknown>;
   provideToolResult(params: TurnToolResult): Promise<unknown>;
   disposeShell(terminals: string): Promise<unknown>;
+  cancelSummary?(runId: string): Promise<unknown>;
   summarize(params: SummarizeRunParams): Promise<SummarizeRunResult>;
   tools(): Promise<unknown>;
   onEvent(handler: (method: string, params: unknown) => void): void;
+  onExit?(handler: () => void): void;
   dispose(): void;
 }
 
@@ -30,6 +34,10 @@ export function spawnKernelClient(command: string, args: string[]): KernelClient
     stdio: ["pipe", "pipe", "pipe"]
   });
   const peer = new JsonRpcPeer(createStdioDuplex(child.stdout, child.stdin));
+  child.stdin.on("error", error => peer.close(error));
+  child.stdout.on("error", error => peer.close(error));
+  child.on("error", error => peer.close(error));
+  child.once("exit", () => peer.close(new Error("Kernel connection closed")));
   child.stderr.on("data", (chunk) => {
     process.stderr.write(chunk);
   });
@@ -39,6 +47,7 @@ export function spawnKernelClient(command: string, args: string[]): KernelClient
     cancel: (runId) => peer.request(KernelMethods.turnCancel, { runId }),
     decide: (params, deny) =>
       peer.request(deny ? KernelMethods.turnDenyTool : KernelMethods.turnApproveTool, params),
+    provideContext: params => peer.request(KernelMethods.turnProvideContext, params),
     provideToolResult: (params) => peer.request(KernelMethods.turnProvideToolResult, params),
     disposeShell: (terminals) => {
       if (child.exitCode !== null || child.signalCode !== null || child.stdin.destroyed) {
@@ -46,10 +55,13 @@ export function spawnKernelClient(command: string, args: string[]): KernelClient
       }
       return peer.request(KernelMethods.shellDispose, { terminals });
     },
+    cancelSummary: runId => peer.request(KernelMethods.summarizeCancel, { runId }),
     summarize: (params) => peer.request(KernelMethods.summarizeRun, params) as Promise<SummarizeRunResult>,
     tools: () => peer.request(KernelMethods.toolsList),
     onEvent: (handler) => peer.onEvent(handler),
+    onExit: (handler) => { child.once("exit", handler); },
     dispose() {
+      peer.close();
       child.kill("SIGTERM");
     }
   };

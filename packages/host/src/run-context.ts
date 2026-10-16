@@ -13,6 +13,12 @@ export type RunContext =
       readonly kind: "work";
       readonly workId: string;
       readonly taskId?: string;
+      readonly bridgeId?: string;
+      readonly discussionId?: string;
+      readonly inputAfterSeq?: number;
+      readonly instruction?: string;
+      readonly membershipRevision?: number;
+      readonly session?: import("./session-store.js").CardSession;
       readonly triggerEventId: string;
       readonly catalogRevision: number;
       readonly catalog: readonly WorkCatalogEntry[];
@@ -35,6 +41,12 @@ export function freezeRunContext(context: RunContext): RunContext {
     kind: "work",
     workId: context.workId,
     ...(context.taskId ? { taskId: context.taskId } : {}),
+    ...(context.session ? { session: Object.freeze({ ...context.session }) } : {}),
+    ...(context.inputAfterSeq !== undefined ? { inputAfterSeq: context.inputAfterSeq } : {}),
+    ...(context.discussionId ? { discussionId: context.discussionId } : {}),
+    ...(context.bridgeId ? { bridgeId: context.bridgeId } : {}),
+    ...(context.instruction !== undefined ? { instruction: context.instruction } : {}),
+    ...(context.membershipRevision !== undefined ? { membershipRevision: context.membershipRevision } : {}),
     triggerEventId: context.triggerEventId,
     catalogRevision: context.catalogRevision,
     catalog: Object.freeze(context.catalog.map((entry) => Object.freeze(structuredClone(entry)))),

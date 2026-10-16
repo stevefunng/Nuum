@@ -1,5 +1,6 @@
 import {
   DEFAULT_AGENT_NAME,
+  estimateModelTokens,
   maxTranscriptSeq,
   type ChatMessage,
   type OutboundMessage,
@@ -13,7 +14,10 @@ export const COMPACTION_PROMPT = [
   "Preserve the user's goals, constraints, decisions, completed work, unresolved",
   "items, exact file paths, commands, errors, and facts needed to continue.",
   "Be compact but concrete. Do not mention this instruction or invent details.",
-  "Use short sections: Goal, Decisions, Completed, Open work, Key details."
+  "Use short sections: Goal, Decisions, Completed, Open work, Key details.",
+  "Separate private conversation from each room by roomId. Preserve room decisions, promises, unresolved questions and message references.",
+  "Distinguish proposals, commitments and verified results, and who owns each. Update the previous summary; do not discard still relevant commitments.",
+  "Keep the current request and unfinished tool work explicit. Never invent omitted facts."
 ].join("\n");
 
 export function repairTranscript(events: TranscriptEvent[]): {
@@ -132,24 +136,24 @@ export function activeTranscript(events: readonly TranscriptEvent[]): Transcript
 }
 
 export function estimateContextTokens(messages: readonly ChatMessage[]): number {
-  const characters = messages.reduce((total, message) => {
-    const calls = message.toolCalls ? JSON.stringify(message.toolCalls).length : 0;
-    return total + message.content.length + (message.thinking?.length ?? 0) + calls;
-  }, 0);
-  return Math.ceil(characters / 3.5);
+  return estimateModelTokens(messages);
 }
 
-export function partitionForCompaction(transcript: readonly TranscriptEvent[]): {
+export function partitionForCompaction(transcript: readonly TranscriptEvent[], allowWithinTurn = false): {
   messagesToSummarize: ChatMessage[];
   preservedTail: ChatMessage[];
   tailFromSeq: number;
   throughSeq: number;
 } | null {
   const active = activeTranscript(transcript);
-  const splitAt = lastIndexWhere(
+  let splitAt = lastIndexWhere(
     active,
     (event) => event.type === "user" || event.type === "wake"
   );
+  if (allowWithinTurn) {
+    const lastAssistant = active.findLastIndex(event => event.type === "assistant");
+    if (lastAssistant > splitAt + 1) splitAt = lastAssistant;
+  }
   if (splitAt <= 0) return null;
   const tailFromSeq = active[splitAt]!.seq;
   const messagesToSummarize = repairTranscript(active.slice(0, splitAt)).events.flatMap(eventToModelMessage);
@@ -179,7 +183,7 @@ function agentWakePrompt(event: Extract<TranscriptEvent, { type: "wake" }>): str
       `<system_reminder>You were assigned work in Work "${event.source.workName}". This is not a private user message.</system_reminder>`,
       `[work ${event.source.workName}] ${event.text}`,
       "",
-      "<system_reminder>Use PostToWork for progress visible to the team. When the assignment is ready for review or blocked, use HandoffTask. Do not use SendMessage for Work updates.</system_reminder>"
+      "<system_reminder>Use SendMessage to speak in this room. Include cardAction when submitting a card for review or reporting a blocker. If nothing useful needs saying, end silently. This run cannot send a private reply.</system_reminder>"
     ].join("\n");
   }
   if (event.source.kind !== "agent") {
@@ -246,7 +250,7 @@ function eventToModelMessage(event: TranscriptEvent): ChatMessage[] {
       {
         id: event.id,
         role: "user",
-        content: `[previous conversation summary] ${event.summary}`,
+        content: `[previous conversation summary] ${event.summary}${event.activeRequest ? `\n\n[Current request, preserved verbatim]\n${event.activeRequest}` : ""}`,
         seq: event.seq,
         createdAt: event.createdAt
       }

@@ -94,9 +94,10 @@ function collector(): { events: { method: string; params: any }[]; emit: (m: str
 
 function waitFor(predicate: () => boolean, what: string): Promise<void> {
   return (async () => {
-    for (let i = 0; i < 200; i += 1) {
+    const deadline = Date.now() + 3_000;
+    while (Date.now() < deadline) {
       if (predicate()) return;
-      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setTimeout(resolve, 2));
     }
     assert.fail(`timed out waiting for ${what}`);
   })();
@@ -454,4 +455,46 @@ test("voiceToolNames follows the run: work-run voice tools suppress the ack remi
   }
   await waitFor(() => events.some((event) => event.method === "turn.ended"), "the turn to end");
   for (const request of requests) assert.deepEqual(reminders(request), []);
+});
+
+test("a successful handoff can end the turn before another tool or model call", async () => {
+  const { deps, requests } = scriptedModel([[{ type: "tool_call", id: "handoff", name: "send_message", arguments: {} }, { type: "tool_call", id: "later", name: "send_message", arguments: {} }]]);
+  const { events, emit } = collector();
+  const handle = startTurn(startParams({ delegatedTools: [sendMessage] }), emit, new ToolRegistry([]), deps);
+  await waitFor(() => events.some(event => event.method === "turn.tool.delegate"), "handoff");
+  handle.provideToolResult("handoff", true, "returned to owner", true);
+  await waitFor(() => events.some(event => event.method === "turn.ended"), "turn end");
+  assert.equal(requests.length, 1);
+  assert.equal(events.filter(event => event.method === "turn.tool.delegate").length, 1);
+  assert.equal(events.at(-1)!.params.status, "idle");
+});
+
+test("every model round waits for Host context and accepts a compacted replacement", async () => {
+  const model = scriptedModel([[{ type: "tool_call", id: "c", name: "send_message", arguments: {} }], [{ type: "text", text: "done" }]]);
+  const log = collector();
+  const handle = startTurn(startParams({ contextWindow: 10000, delegatedTools: [sendMessage] }), log.emit, new ToolRegistry(), model.deps);
+  await waitFor(() => log.events.some(e => e.method === "turn.context"), "first context check");
+  assert.equal(model.requests.length, 0);
+  handle.provideContext(log.events.find(e => e.method === "turn.context")!.params.requestId);
+  await waitFor(() => log.events.some(e => e.method === "turn.tool.delegate"), "tool");
+  handle.provideToolResult("c", true, "delivered");
+  await waitFor(() => log.events.filter(e => e.method === "turn.context").length === 2, "next context check");
+  handle.provideContext(log.events.filter(e => e.method === "turn.context")[1]!.params.requestId, [{ id: "summary", role: "user", seq: 1, createdAt: 0, content: "compacted history" }]);
+  await waitFor(() => log.events.some(e => e.method === "turn.ended"), "completion");
+  assert.equal(model.requests.length, 2);
+  assert.ok(model.requests[1]!.messages.some(m => m.id === "summary"));
+  assert.equal(model.requests[1]!.messages.some(m => m.toolCalls?.length), false);
+});
+
+test("context failure and cancellation never start another model request", async () => {
+  for (const cancel of [false, true]) {
+    const model = scriptedModel([]);
+    const log = collector();
+    const handle = startTurn(startParams({ contextWindow: 10000 }), log.emit, new ToolRegistry(), model.deps);
+    await waitFor(() => log.events.some(e => e.method === "turn.context"), "context wait");
+    if (cancel) handle.cancel();
+    else handle.provideContext(log.events[0]!.params.requestId, undefined, "Compaction failed");
+    await waitFor(() => log.events.some(e => e.method === "turn.ended"), "ended");
+    assert.equal(model.requests.length, 0);
+  }
 });

@@ -36,3 +36,12 @@ test("json-rpc request/response and events", async () => {
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.deepEqual(seen, ["session.updated"]);
 });
+
+test("closing RPC rejects outstanding and future requests", async () => {
+  const peer = new JsonRpcPeer({ write() {}, onLine: () => () => {} });
+  const pending = peer.request("waiting");
+  const rejected = assert.rejects(pending, /closed/);
+  peer.close(new Error("closed"));
+  await rejected;
+  await assert.rejects(peer.request("later"), /closed/);
+});

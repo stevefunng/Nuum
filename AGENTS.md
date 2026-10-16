@@ -4,7 +4,8 @@
 > 先读本文件再改代码。改业务逻辑、协议或进程边界时先读 [开发规范](./docs/coding/README.md)；修改 UI、交互或主题时还必须阅读 [UI 规范](./docs/coding/ui-guidelines.md)。
 > 当前施工：agent-first 主链路、会话真源 / UI 投影与 NunuBar V1 已实现。
 > Proactive Mode 已有 Host 策略与菜单栏控制基座；上下文采集、模型评估与行动执行尚未接入。详见 [基座说明](./docs/proactive/foundation.md)。
-> 更新时间：2026-09-28
+> Room / NunuBar 新方案（主 session 增量群聊 + 独立卡片 session）已按简化方案重构：改 Work 协作域前先读 [NunuBar 设计](./docs/workbar/foundation.md)。
+> 更新时间：2026-10-15
 
 ## 项目定位
 
@@ -99,6 +100,6 @@ pnpm run lint:deps
 
 三进程边界；主键是 agent（一条转录、一份记忆、可互发）；分段 system prompt；SendMessage 是助手唯一对用户出口；支持 Compact 检查点、每 agent workspace、按动作权限、新本地文件/搜索工具，以及每 agent 长驻 `shell` 会话。JSONL 转录保持唯一真源，UI 按因果关系投影出用户消息、agent 互发消息和可折叠工具活动，不维护第二条时间线。
 
-NunuBar V1 使用独立追加式 Work timeline 保存共享聊天、任务、派工与 handoff；任务卡和聊天室都是投影。成员真源是 Agent settings 中带 revision 的单槽 `workMembership`，可动态挂入、移出和跨 Work 移动。Work run 冻结成员范围与 capability catalog，只继承 Work 显式配置的 Skill、CLI、只读知识目录和本地工具；私人 Agent transcript 仍独立记录该 Agent 实际收到的 Work 唤醒与执行过程。
+Room / NunuBar 共用追加式 Work timeline，聊天与卡片为投影。成员真源已迁到 Room，Nunu 可加入多个房间；普通本地讨论使用主 session；同群同 compact 代际连续时增量，否则补最近 24 条背景，卡片按参与 Nunu 使用独立可恢复 session。同 Nunu 共用一个执行槽。SendMessage 将卡片交付/阻塞摘要与流转作为一个事件提交；UI 支持房间升级、独立执行记录及人工验收。建卡 Nunu 固定负责，worker 回报自动返回负责人卡片 session，阻塞待用户确认；Room / NunuBar 无 @ 均唤醒，群聊采用三轮、十条公开消息的顺序循环及提及选择，不持久化循环位置。客户端快照水位仅管理房间顺序，与模型输入位置分离。通用 compact 支持后台准备、长 run 调用边界应用、版本校验和取消；个人会话仅显示群聊参与提示。不确定执行须显式继续；跨用户推迟 V3，验证及限制见 [实施进度](./docs/workbar/implementation.md)。
 
 Proactive 基座按 `AgentSettings.proactive` 保存每个 Nunu 的独立策略，本期菜单栏只展示默认成员；启停、定时暂停、检查与活动记录由 Host 管理。当前没有产品上下文来源，不调用模型或执行 proactive 行动。关闭主窗口后保留菜单栏与后台进程，退出 Nuum 才结束。

@@ -1,66 +1,39 @@
+![Nuum — a family of soft, colorful Nunu companions](./docs/assets/nuum-banner.png)
+
 # Nuum
 
-Nuum is a local-first desktop environment for persistent AI agents.
+Nuum is a local-first desktop app for persistent AI companions called Nunu.
 
-Most AI products organize work around disposable chat sessions. Nuum takes the opposite position: an Agent is a durable entity with its own identity, conversation truth, memory, workspace, and ability to collaborate with other Agents. Users delegate work to Agents instead of managing session folders.
+Each Nunu has its own identity, memory, and workspace. Work with one directly, bring several together to discuss an idea, or give them tasks to carry out and return for your review.
 
-## Product philosophy
+## What you can do
 
-### Assign work, not sessions
+- **Build an ongoing working relationship.** Each Nunu keeps its identity and memory across conversations and tasks.
+- **Work with local tools.** Nunu can work with files, search, and run shell commands under configured permissions.
+- **Bring Nunu together.** Create a Room for discussion, then upgrade it to a NunuBar when you need task cards and deliverables.
+- **Choose your model provider.** Connect DeepSeek, OpenAI, or Anthropic.
 
-The user should decide what needs to be done and who should own it. Session boundaries are an implementation detail created while an Agent works, not a product object the user has to maintain.
+## Room / NunuBar
 
-### Agents are persistent entities
+A Room is a shared conversation with your Nunu. The same Nunu can participate in multiple rooms; mention specific members to direct a question, or address the group.
 
-An Agent keeps a stable identity across tasks. Its transcript records what it actually saw and did; its memory carries useful experience forward; its workspace and permissions define where it may act.
+Upgrade a Room to a **NunuBar** to turn discussion into work without losing its members or history. Task cards keep ownership, progress, and results together. A Nunu can delegate work to another member while remaining responsible for the result, and finished work comes back for your review.
 
-### Work belongs in one place
+Collaboration currently runs locally. Cross-user collaboration is planned.
 
-Project goals, tasks, shared discussion, collaborators, tools, Skills, CLIs, and knowledge sources belong to a Work—not to an arbitrary chat. Work Bar coordinates these resources without turning Nuum back into a session-first system.
+## Local-first, with your control
 
-### Proactivity needs a separate context domain
+Nuum stores agent history, memory, and workspaces locally. You choose the model provider and configure permissions for tools. Model requests send the context needed for a task to your configured provider.
 
-Proactive Mode is a separate planned product line. Ambient screen and accessibility context must not be poured into an Agent transcript or long-term memory. It should be captured under explicit permission, reduced locally into bounded evidence, and handed to a dedicated Proactive Agent only when it forms a useful proposal.
+You review deliverables, confirm how to proceed when work is blocked, and explicitly resume interrupted work whose outcome is uncertain.
 
-### Facts are written once
+## Project status
 
-Nuum separates durable truth by domain:
+Nuum is under active development. Persistent Nunu, local tools, Rooms, and NunuBar task collaboration are implemented. Broader end-to-end validation with real models and external tools is still in progress.
 
-- Agent transcripts are the source of truth for what an Agent saw and did.
-- Work timelines are the source of truth for shared chat, tasks, handoffs, and deliverables.
-- Proactive context logs will be the source of truth for permitted environmental observations.
+**Proactive Mode** currently provides menu-bar controls and per-Nunu settings. Context collection, model evaluation, and proactive actions are not connected yet.
 
-UI timelines, model context, status indicators, and task boards are projections of those truths—not competing databases.
-
-### Local-first and least disclosure
-
-Private memory, raw environmental context, credentials, and local paths stay on the user's machine by default. Discovering a capability never implies permission to use it, and shared Work context must not expose an Agent's private transcript or memory.
-
-## Current architecture
-
-```text
-Renderer ──IPC──> Desktop main ──stdio RPC──> Host ──stdio RPC──> Kernel
-                  shell / secrets             product state       model loop
-```
-
-The current implementation provides:
-
-- one append-only transcript, memory, workspace, and persistent shell per Agent;
-- asynchronous Agent-to-Agent messaging;
-- causal projections for user messages, peer messages, and tool activity;
-- compact checkpoints without rewriting transcript history;
-- action-scoped permissions and local file/search tools;
-- OpenAI, Anthropic, and DeepSeek model routing.
-- Work Bar V1 with an append-only Work timeline, task board, shared room, dynamic Agent membership, scoped dispatch and handoff, and Work-owned Skill, CLI, knowledge, and local-tool configuration.
-
-The Host owns product semantics and persistence. The Kernel only executes model runs identified by `runId` and never owns Agent state.
-
-## Planned independent product lines
-
-- **Proactive Mode** — a dedicated default Agent backed by a permissioned, bounded ContextStore. It is designed to work without Work Bar.
-- **Work Bar follow-ups** — richer deliverable review, additional capability providers, and networked collaboration. Work Bar remains independent from Proactive Mode.
-
-They may gain an optional proposal-to-task bridge later, but neither is an architectural dependency of the other.
+For architecture, validation details, and current limits, see the [Room / NunuBar documentation](./docs/workbar/foundation.md), [validation notes](./docs/workbar/implementation.md), and [Proactive foundation](./docs/proactive/foundation.md).
 
 ## Repository map
 
@@ -88,10 +61,6 @@ pnpm run lint:deps
 ```
 
 Start with [AGENTS.md](./AGENTS.md) for the project map and [docs/coding](./docs/coding/README.md) before changing product behavior.
-
-## Project status
-
-Nuum is under active development. The agent-first foundation and Work Bar V1 are implemented. Proactive Mode remains an independent work in progress.
 
 ## License
 

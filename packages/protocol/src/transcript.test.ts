@@ -332,3 +332,9 @@ test("OutboundMessage accepts a structured widget payload", () => {
     assert.equal(parsed.widget.options[0]?.value, "Yes, deploy now");
   }
 });
+
+test("room participation remains visible without exposing the internal model prompt", () => {
+  const result = projectAgent([{ type: "wake", id: "w", seq: 1, createdAt: 1, hops: 0, text: "Trigger: internal instructions", source: { kind: "work", workId: "room", workName: "Design", bridgeId: "w" } }]);
+  assert.ok(JSON.stringify(result).includes("Design"));
+  assert.equal(JSON.stringify(result).includes("Trigger:"), false);
+});
