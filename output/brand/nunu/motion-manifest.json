@@ -1,0 +1,33 @@
+{
+  "fps": 60,
+  "size": 256,
+  "source": "actions-atlas.png",
+  "neutralBounds": [
+    21,
+    20,
+    235,
+    236
+  ],
+  "actions": {
+    "wave": {
+      "frames": 127,
+      "duration": 2.1166666666666667,
+      "bytes": 185674
+    },
+    "think": {
+      "frames": 145,
+      "duration": 2.4166666666666665,
+      "bytes": 271771
+    },
+    "cheer": {
+      "frames": 127,
+      "duration": 2.1166666666666667,
+      "bytes": 239571
+    },
+    "sleepy": {
+      "frames": 163,
+      "duration": 2.716666666666667,
+      "bytes": 291990
+    }
+  }
+}
