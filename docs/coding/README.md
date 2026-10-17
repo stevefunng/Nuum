@@ -7,6 +7,7 @@
 | [原则](./principles.md) | 动手写代码前 |
 | [测试](./tdd.md) | 新增或改行为时 |
 | [UI 规范](./ui-guidelines.md) | 修改界面、交互、字体、主题或组件时 |
+| [Nunu 与品牌规范](./nunu-brand.md) | 修改 Logo、角色外观、资料卡或角色动画时 |
 | [提交](./git.md) | 用户要求提交时 |
 
 地图、进程和包职责以仓根 [AGENTS.md](../../AGENTS.md) 为准。
