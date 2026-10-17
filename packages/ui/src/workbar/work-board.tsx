@@ -209,7 +209,7 @@ export function WorkBoard({
 
                 >
                   <button className="sand-work-member__identity" aria-expanded={statusAnchor?.id === member.profile.id} onClick={(event) => { const element = event.currentTarget; if (statusAnchor?.id === member.profile.id) setStatusAnchor(null); else setStatusAnchor({ id: member.profile.id, element, shape: statusShape.current++ % 4 }); }} type="button">
-                    <AgentAvatar agentId={member.profile.id} color={member.profile.avatarColor} shape={member.profile.avatarShape} size={34} state={member.runtime.status === "running" ? "working" : "idle"} />
+                    <AgentAvatar agentId={member.profile.id} color={member.profile.avatarColor} shape={member.profile.avatarShape} material={member.profile.avatarMaterial} size={34} state={member.runtime.status === "running" ? "working" : "idle"} />
                     <span><strong>{member.profile.name}</strong></span>
                   </button>
                   <button
@@ -235,7 +235,7 @@ export function WorkBoard({
                 const agent = agents.find((item) => item.profile.id === id);
                 return agent ? (
                   <span className="sand-work-task-person" key={id}>
-                    <AgentAvatar agentId={id} color={agent.profile.avatarColor} shape={agent.profile.avatarShape} size={24} state={agent.runtime.status === "running" ? "working" : "idle"} />
+                    <AgentAvatar agentId={id} color={agent.profile.avatarColor} shape={agent.profile.avatarShape} material={agent.profile.avatarMaterial} size={24} state={agent.runtime.status === "running" ? "working" : "idle"} />
                     <strong>{agent.profile.name}</strong>
                   </span>
                 ) : null;

@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { SandIcon, SandIconButton } from "../kit/sand-kit-primitives";
 import { AutoTextarea } from "../kit/auto-textarea";
 import { AGENT_AVATAR_MATERIAL_HIDDEN, AgentAvatar, rollAgentAvatar } from "./agent-avatar";
+import { nunuActivityState } from "./nunu-state";
 import { AGENT_ROLE_TEMPLATES } from "./agent-templates";
 
 export interface PendingTool {
@@ -287,6 +288,7 @@ function PeerConversation({ agent, peer, blocks, timestamps, onClose }: {
   const peerId = blocks[0]?.agentId ?? peer?.profile.id ?? "peer";
   const peerName = peer?.profile.name ?? blocks[0]?.agentName ?? t("Agent");
   const blockIds = blocks.map((block) => block.id);
+
   const timeline = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (timeline.current) timeline.current.scrollTop = timeline.current.scrollHeight;
@@ -362,7 +364,8 @@ function AgentCreation({
             color={avatar.color}
             shape={avatar.shape}
             material={avatar.material}
-            size={92}
+            size={112}
+            fullBody
             state="happy"
           />
           {avatar.material === AGENT_AVATAR_MATERIAL_HIDDEN ? <span className="sand-agent-create__hidden">{t("Hidden edition")}</span> : null}
@@ -456,6 +459,9 @@ export function ConversationWorkspace({
   );
   const peerAgent = agents.find((item) => item.profile.id === peerSheetAgentId) ?? null;
   const blockIds = blocks.map((block) => block.id);
+  const liveTools = blocks.some(block => block.type === "assistant" && block.live && block.tools.some(tool => tool.status === "pending"));
+  const avatarState = nunuActivityState(agent?.runtime.status, Boolean(pendingTool), liveTools);
+  const activityLabel = avatarState === "waiting" ? t("Waiting for approval") : avatarState === "thinking" ? t("思考中") : t("Working");
 
   useEffect(() => setPeerSheetAgentId(null), [agent?.profile.id]);
 
@@ -489,11 +495,11 @@ export function ConversationWorkspace({
                 shape={agent.profile.avatarShape}
                 material={agent.profile.avatarMaterial}
                 size={28}
-                state={agent.runtime.status === "running" ? "working" : "idle"}
+                state={avatarState}
               />
             </span>
             <span id="sand-conversation-heading">{agent.profile.name}</span>
-            {agent.runtime.status === "running" ? <small>{t("Working")}</small> : null}
+            {agent.runtime.status === "running" ? <small>{activityLabel}</small> : null}
           </button>
         ) : (
           <div className="sand-chat-header__identity sand-chat-header__identity--blank" />
@@ -545,10 +551,11 @@ export function ConversationWorkspace({
               color={agent.profile.avatarColor}
               shape={agent.profile.avatarShape}
               material={agent.profile.avatarMaterial}
-              size={30}
-              state="working"
+              size={40}
+              fullBody
+              state={avatarState}
             />
-            <span className="sand-chat-working__label">{t("Working")}</span>
+            <span className="sand-chat-working__label">{activityLabel}</span>
           </div>
         ) : null}
         {pendingTool ? (

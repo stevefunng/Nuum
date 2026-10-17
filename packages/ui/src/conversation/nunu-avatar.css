@@ -1,0 +1,34 @@
+.nunu-avatar { display: inline-flex; flex: none; width: var(--sand-avatar-size); height: var(--sand-avatar-size); vertical-align: middle; }
+.nunu-avatar > svg { display: block; overflow: visible; }
+.nunu-avatar__body { transform-origin: 116px 200px; }
+.nunu-avatar__eye { transform-box: fill-box; transform-origin: center; animation: nunu-blink 6s ease-in-out infinite; }
+.nunu-avatar__arm { transform-origin: 183px 161px; }
+.nunu-avatar[data-state="thinking"] .nunu-avatar__face { animation: nunu-think 2.8s ease-in-out infinite; }
+.nunu-avatar[data-state="working"] .nunu-avatar__body { animation: nunu-work 1.3s ease-in-out infinite; }
+.nunu-avatar[data-state="waiting"] .nunu-avatar__body { transform: rotate(-5deg); }
+.nunu-avatar[data-state="waiting"] .nunu-avatar__arm { transform: rotate(-65deg); }
+.nunu-avatar[data-state="error"] .nunu-avatar__body { transform: translateY(5px) scaleY(.96); }
+.nunu-avatar[data-state="happy"] .nunu-avatar__body,
+.nunu-avatar[data-state="receiving"] .nunu-avatar__body { animation: nunu-hop 850ms cubic-bezier(.22,1,.36,1) both; }
+.nunu-avatar[data-state="wave"] .nunu-avatar__arm { animation: nunu-wave 1s ease-in-out 2; }
+.nunu-avatar[data-state="wave"] .nunu-avatar__body { animation: nunu-greet 1s ease-in-out 2; }
+.nunu-avatar[data-state="sending"] .nunu-avatar__body { animation: nunu-greet 650ms ease-in-out; }
+.nunu-avatar[data-full="true"][data-state="thinking"] .nunu-avatar__body { animation: nunu-ponder 3s ease-in-out infinite; }
+@keyframes nunu-ponder { 0%,100% { transform: rotate(0); } 40%,65% { transform: rotate(-5deg) translateY(-2px); } }
+@keyframes nunu-blink { 0%, 93%, 98%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.12); } }
+@keyframes nunu-think { 0%,100% { transform: translate(0,0); } 40%,65% { transform: translate(5px,-5px); } }
+@keyframes nunu-work { 0%,100% { transform: rotate(-2deg); } 50% { transform: rotate(2deg) scale(1.025,.975); } }
+@keyframes nunu-hop { 0%,100% { transform: translateY(0); } 20% { transform: scale(1.06,.94); } 48% { transform: translateY(-18px) scale(.97,1.03); } 75% { transform: scale(1.04,.96); } }
+@keyframes nunu-wave { 0%,100% { transform: rotate(-35deg); } 30%,70% { transform: rotate(-80deg); } 50% { transform: rotate(-50deg); } }
+@keyframes nunu-greet { 0%,100% { transform: rotate(0); } 50% { transform: rotate(-7deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .nunu-avatar *, .sand-chat-working__label { animation: none !important; transition: none !important; }
+}
+
+.nunu-portrait { position: relative; display: block; width: 100%; aspect-ratio: 1; }
+.sand-nunu-badge__avatar .nunu-portrait__filters { position: absolute; width: 0; height: 0; overflow: hidden; }
+.nunu-portrait__media { position: absolute; inset: 0; }
+.nunu-portrait__media > img, .nunu-portrait__media > canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.nunu-portrait__media > canvas { opacity: 0; }
+.nunu-portrait[data-ready="true"] .nunu-portrait__media > canvas { opacity: 1; }
+.nunu-portrait[data-ready="true"] .nunu-portrait__media > img { visibility: hidden; }

@@ -45,7 +45,7 @@ export function TaskLanes({ tasks, agents, onOpen }: {
               <span className="sand-work-task-card__footer">
                 <span className="sand-work-task-card__avatars">{task.assigneeIds.slice(0, 3).map((id) => {
                   const agent = agents.find((item) => item.profile.id === id);
-                  return agent ? <AgentAvatar key={id} agentId={id} color={agent.profile.avatarColor} shape={agent.profile.avatarShape} size={20} state="idle" /> : null;
+                  return agent ? <AgentAvatar key={id} agentId={id} color={agent.profile.avatarColor} shape={agent.profile.avatarShape} material={agent.profile.avatarMaterial} size={20} state="idle" /> : null;
                 })}</span>
                 <span>{task.assigneeIds.length ? task.assigneeIds.map((id) => agents.find((agent) => agent.profile.id === id)?.profile.name ?? t("Agent")).join(", ") : t("Unassigned")}</span>
                 {task.deliverables.length ? <small>{t("{count} files", { count: task.deliverables.length })}</small> : null}

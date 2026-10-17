@@ -2,6 +2,7 @@ import { t } from "../i18n";
 import type { AgentProfile, AgentUpdateParams } from "@nuum/protocol";
 import { useEffect, useId, useRef, useState } from "react";
 import { AgentAvatar } from "./agent-avatar";
+import { NunuPortrait } from "./nunu-portrait";
 import { AGENT_ROLE_TEMPLATES, hasEditedIdentity, markIdentityEdited } from "./agent-templates";
 import { SandIconButton } from "../kit/sand-kit-primitives";
 import { WorkDialog } from "../workbar/work-dialog";
@@ -12,17 +13,24 @@ export type AgentProfilePatch = Pick<AgentUpdateParams, "name" | "tags" | "descr
 
 // 在不旋转的外层测量指针，避免卡面倾斜改变命中坐标而产生抖动。
 function NunuBadge({ profile, onEdit }: { profile: AgentProfile; onEdit(): void }) {
-  const ref = useRef<HTMLButtonElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
   const ringId = useId();
+  const [reaction, setReaction] = useState(0);
   const frame = useRef(0);
   const reduced = useRef(false);
-  const motion = useRef({ x: 0, y: 0, targetX: 0, targetY: 0, time: 0 });
+  const motion = useRef({ x: 0, y: 0, targetX: 0, targetY: 0, sealX: 0, sealY: 0, time: 0 });
   const animate = (time: number) => {
     const node = ref.current;
     if (!node) return;
     const state = motion.current;
     const blend = 1 - Math.exp(-Math.min(time - state.time || 16, 64) / 85);
+    const sealBlend = 1 - Math.exp(-Math.min(time - state.time || 16, 64) / 420);
     state.time = time;
+    state.sealX += (state.targetX - state.sealX) * sealBlend;
+    state.sealY += (state.targetY - state.sealY) * sealBlend;
+    node.style.setProperty("--seal-rx", `${-state.sealY * 0.6}deg`);
+    node.style.setProperty("--seal-ry", `${state.sealX * 0.6}deg`);
+    node.style.setProperty("--seal-angle", `${115 + state.sealX * 2}deg`);
     state.x += (state.targetX - state.x) * blend;
     state.y += (state.targetY - state.y) * blend;
     node.style.setProperty("--badge-rx", `${-state.y * 9}deg`);
@@ -32,7 +40,7 @@ function NunuBadge({ profile, onEdit }: { profile: AgentProfile; onEdit(): void 
     node.style.setProperty("--badge-sweep", `${50 + state.x * 35 + state.y * 15}%`);
     node.style.setProperty("--badge-angle", `${115 + state.x * 20 - state.y * 12}deg`);
     frame.current = 0;
-    if (Math.abs(state.targetX - state.x) + Math.abs(state.targetY - state.y) > 0.001) {
+    if (Math.abs(state.targetX - state.x) + Math.abs(state.targetY - state.y) + Math.abs(state.targetX - state.sealX) + Math.abs(state.targetY - state.sealY) > 0.001) {
       frame.current = requestAnimationFrame(animate);
     }
   };
@@ -48,7 +56,7 @@ function NunuBadge({ profile, onEdit }: { profile: AgentProfile; onEdit(): void 
       if (query.matches) {
         cancelAnimationFrame(frame.current);
         frame.current = 0;
-        motion.current = { x: 0, y: 0, targetX: 0, targetY: 0, time: 0 };
+        motion.current = { x: 0, y: 0, targetX: 0, targetY: 0, sealX: 0, sealY: 0, time: 0 };
         ref.current?.removeAttribute("style");
       }
     };
@@ -66,16 +74,10 @@ function NunuBadge({ profile, onEdit }: { profile: AgentProfile; onEdit(): void 
   const tags = profile.tags ?? [];
   const created = new Date(profile.createdAt);
   const createdDate = `${created.getFullYear()}/${String(created.getMonth() + 1).padStart(2, "0")}/${String(created.getDate()).padStart(2, "0")}`;
-  return <div className="sand-nunu-badge-stage" onPointerMove={tilt} onPointerLeave={reset} onPointerCancel={reset}>
-    <button ref={ref} type="button" className="sand-nunu-badge" aria-label={t("Click to edit profile")} onClick={onEdit}>
-      <span className="sand-nunu-badge__seal">
-        <svg className="sand-nunu-badge__ring" viewBox="0 0 200 200" aria-hidden="true">
-          <defs><path id={ringId} d="M 100,100 m -82,0 a 82,82 0 1,1 164,0 a 82,82 0 1,1 -164,0" /></defs>
-          <text><textPath href={`#${ringId}`} textLength="510" lengthAdjust="spacing">NUUM · A MIND OF YOUR OWN · NUUM · ALWAYS WITH YOU · </textPath></text>
-          <circle cx="100" cy="100" r="68" />
-        </svg>
-        <span className="sand-nunu-badge__avatar"><AgentAvatar agentId={profile.id} color={profile.avatarColor} shape={profile.avatarShape} material={profile.avatarMaterial} size={72} /></span>
-      </span>
+  return <div ref={ref} className="sand-nunu-badge-stage" onPointerMove={tilt} onPointerLeave={reset} onPointerCancel={reset}>
+    <div className="sand-nunu-badge">
+      <button type="button" className="sand-nunu-badge__edit-surface" aria-label={t("Click to edit profile")} onClick={onEdit} />
+      <span className="sand-nunu-badge__seal-space" aria-hidden="true" />
       <strong className="sand-nunu-badge__name">{profile.name}</strong>
       {tags.length > 0 ? <span className="sand-nunu-badge__tags">{tags.map((tag) => <span key={tag}>{tag}</span>)}</span> : null}
       <span className="sand-nunu-badge__desc" data-empty={!profile.description || undefined}>{profile.description || t("What should this Agent do?")}</span>
@@ -86,7 +88,18 @@ function NunuBadge({ profile, onEdit }: { profile: AgentProfile; onEdit(): void 
         </svg>
       </span>
       <span className="sand-nunu-badge__glare" aria-hidden="true" />
-    </button>
+    </div>
+      <span className="sand-nunu-badge__seal">
+        <svg className="sand-nunu-badge__ring" viewBox="0 0 200 200" aria-hidden="true">
+          <defs><path id={ringId} d="M 100,100 m -89,0 a 89,89 0 1,1 178,0 a 89,89 0 1,1 -178,0" /></defs>
+          <text><textPath href={`#${ringId}`} textLength="554" lengthAdjust="spacing">NUUM · A MIND OF YOUR OWN · NUUM · ALWAYS WITH YOU · </textPath></text>
+          <circle cx="100" cy="100" r="76" />
+        </svg>
+        <button type="button" className="sand-nunu-badge__avatar" aria-label={t("Greet {name}", { name: profile.name })}
+          onClick={(event) => { event.stopPropagation(); setReaction(value => value + 1); }}>
+          <NunuPortrait agentId={profile.id} color={profile.avatarColor} shape={profile.avatarShape} material={profile.avatarMaterial} reaction={reaction} />
+        </button>
+      </span>
   </div>;
 }
 

@@ -1,4 +1,7 @@
 export const messages: Record<string, Record<"zh-CN" | "en", string>> = {
+  "Greet {name}": { "zh-CN": "和 {name} 打招呼", "en": "Greet {name}" },
+  "Waiting for approval": { "zh-CN": "等待确认", "en": "Waiting for approval" },
+
   "Run failed": { "zh-CN": "执行出错", "en": "Run failed" },
   "Discussing": { "zh-CN": "正在讨论", "en": "Discussing" },
   "Working in another session": { "zh-CN": "正在其他会话工作", "en": "Working in another session" },
