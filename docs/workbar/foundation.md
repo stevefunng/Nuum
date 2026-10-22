@@ -10,6 +10,8 @@ Room 是本地讨论底座；升级为 NunuBar 保留房间 ID、成员和历史
 
 所有 session 共用该 Nunu 的一个执行槽。不同 Nunu 可并行，但活动 run 的共享 project root（包括父子目录）串行。这个约束不等于后台进程或任意外部资源锁；未知副作用不自动重放。
 
+2026-10-20：房间创建后由 Host 分配系统文稿/Nuum/Rooms/<房间名称>，成员在房间内使用该共享目录。个人目录是文稿/Nuum/<Nunu 名称>；历史自定义目录不移动、不删除，统一改用新目录。NunuBar 的 goal 不再创建、更新、展示或注入提示词，旧 description 仅保留存储兼容；右上角工作中计数和设置菜单已移除。文件、搜索、shell、RunWorkCLI 统一走独立执行 daemon；命令/联网审批按所属房间展示，授权按 Nunu 与工作区分别记忆。详见 [实施记录](../reviews/2026-10-20-sandbox-implementation.md)。
+
 ## 三个独立问题
 
 | 问题 | 真源及实现 |
@@ -68,3 +70,7 @@ worker 用 SendMessage 提交结果：公开摘要、卡片变化和回报关系
 业务事件就是执行来源。`execution.started` 在调用模型／工具前持久化，`execution.finished` 记录结论。启动时一次核对：未开始且仍有效的来源可执行；已开始但不确定、失败或卡片没有交付则显示继续入口；取消、过期来源和已提交结果不自动重跑。用户继续复用原卡片 session，并创建明确的新请求。公开结果使用版本及当前来源校验，迟到旧结果不能覆盖新卡片。
 
 迁移备份旧 timeline 和 cursor 文件，记录一次 `history.imported`；旧不确定输入要求用户继续。旧 dispatch 事件仅兼容读取，不再写新 dispatch 链；旧 cursor 不迁成客户端同步水位。旧私人混合历史不自动拆分或删除。
+
+2026-10-22：房间与私聊共用新的理由型审批卡。普通工作区命令免逐条审批；external_operation 由同一 daemon 在独立受限上下文执行。长期授权按 Nunu 及资源保存；卡片拒绝记录按卡片与用户明确派发代际隔离，自动派发不绕过拒绝。详见 [权限记录](../reviews/2026-10-22-per-agent-permissions.md)。
+
+工作区共享、每 Nunu 授权以及审批/撤销的当前产品规则见[沙箱产品文档](../sandbox/product.md)，进程与恢复边界见[沙箱技术架构](../sandbox/architecture.md)。

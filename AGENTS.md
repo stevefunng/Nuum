@@ -11,7 +11,7 @@
 
 Nuum 是 agent-first 的本地 AI 桌面客户端。它把 agent 作为持久实体，让身份、记忆、工具与工作状态独立于临时会话存在。
 
-技术本质：**Electron 薄壳 + React UI + 独立 Host 进程 + 独立 Kernel 进程**。模型默认走 DeepSeek（OpenAI 兼容），也支持 OpenAI / Anthropic 官方 API。产品后端是 Host 与 Kernel。
+技术本质：**Electron 薄壳 + React UI + 独立 Host、Kernel 与执行 daemon**。模型默认走 DeepSeek（OpenAI 兼容），也支持 OpenAI / Anthropic 官方 API。Host 管产品与授权，Kernel 管模型循环，执行 daemon 管受限本地执行。
 
 ## 仓库结构
 
@@ -23,6 +23,7 @@ Nuum/
 │   ├── ui/                      # 渲染层（侧栏、工作区、设置、主题 token）
 │   ├── host/                    # 会话 / 设置 / 权限 / 拉起 Kernel；入口 src/main.ts，bin: nuum-host
 │   ├── kernel/                  # 模型循环、工具执行；入口 src/main.ts，bin: nuum-kernel
+│   ├── executor/                # 应用级执行 daemon、执行记录、隔离工具进程
 │   ├── protocol/                # Desktop ↔ Host ↔ Kernel 的 JSON-RPC 契约
 │   ├── tools/                   # 工具注册与内置工具
 │   └── sandbox/                 # 工具执行沙箱
@@ -44,6 +45,8 @@ Renderer  --IPC-->  Desktop main  --stdio RPC-->  Host  --stdio RPC-->  Kernel
 
 - Desktop spawn Host：`packages/host/dist/main.js`，并传入 `--kernel-entry packages/kernel/dist/main.js`。
 - Host spawn Kernel。Renderer 只调用 Host RPC（`HostMethods` / `HostEvents`）。
+- Host 另行监督 `packages/executor/dist/main.js`，通过私有 Unix socket 授权上下文；Kernel 使用该上下文调用文件、搜索和 shell。`RunWorkCLI` 也经过 daemon。禁止生产代码绕回 Host/Kernel 直接执行。
+- 当前 OS 隔离仅验证 macOS，通过 sandbox-runtime 的 Seatbelt 与网络代理落实；不支持的平台拒绝执行。构建 executor 时必须生成 `dist/worker-bundle.mjs`。
 - Kernel 是 Host 拉起的引擎子进程，协议为 stdio JSON-RPC。
 - API Key 由 Desktop `safeStorage` 保管，经 Host RPC 下发；`PublicSettings` 只带 `hasOpenaiKey` / `hasAnthropicKey` / `hasDeepseekKey`。
 
@@ -82,6 +85,7 @@ Nuum 的桌面 UI 采用紧凑、原生、低视觉噪音的 Grokbot-like 设计
 - `packages/kernel` → `@nuum/protocol`、`@nuum/tools`、`@nuum/sandbox`
 - `packages/tools` → `@nuum/protocol`、`@nuum/sandbox`
 - `packages/sandbox` → `@nuum/protocol`
+- `packages/executor` → `@nuum/protocol`、`@nuum/tools`、`@nuum/sandbox`；Host/Kernel 只能通过协议调用 executor，不能导入其实现。
 - `packages/ui` → `@nuum/protocol`
 
 ## 启动与验证
@@ -103,3 +107,9 @@ pnpm run lint:deps
 Room / NunuBar 共用追加式 Work timeline，聊天与卡片为投影。成员真源已迁到 Room，Nunu 可加入多个房间；普通本地讨论使用主 session；同群同 compact 代际连续时增量，否则补最近 24 条背景，卡片按参与 Nunu 使用独立可恢复 session。同 Nunu 共用一个执行槽。SendMessage 将卡片交付/阻塞摘要与流转作为一个事件提交；UI 支持房间升级、独立执行记录及人工验收。建卡 Nunu 固定负责，worker 回报自动返回负责人卡片 session，阻塞待用户确认；Room / NunuBar 无 @ 均唤醒，群聊采用三轮、十条公开消息的顺序循环及提及选择，不持久化循环位置。客户端快照水位仅管理房间顺序，与模型输入位置分离。通用 compact 支持后台准备、长 run 调用边界应用、版本校验和取消；个人会话仅显示群聊参与提示。不确定执行须显式继续；跨用户推迟 V3，验证及限制见 [实施进度](./docs/workbar/implementation.md)。
 
 Proactive 基座按 `AgentSettings.proactive` 保存每个 Nunu 的独立策略，本期菜单栏只展示默认成员；启停、定时暂停、检查与活动记录由 Host 管理。当前没有产品上下文来源，不调用模型或执行 proactive 行动。关闭主窗口后保留菜单栏与后台进程，退出 Nuum 才结束。
+
+工作区由 Host 分配：个人使用系统文稿/Nuum/<名称>，同房间成员使用文稿/Nuum/Rooms/<房间名称>。授权保存在每 Nunu 的 settings.json，按工作区记忆命令和网络目标；默认工具断网。资料卡提供配置组件，客户端设置不再保存当前 Nunu 目录；NunuBar 无 goal、独立设置菜单或右上角工作中计数。生命周期和验收见 [执行 daemon 实施记录](./docs/reviews/2026-10-20-sandbox-implementation.md)；不得新增锁或隐含扩展现有调度互斥。
+
+2026-10-22 权限更新：工作区内普通执行免逐条审批；外部文件与命令使用 external_operation，通过 Host 审批后在独立受限上下文执行。审批以模型理由为主，按钮为单次允许／始终允许／拒绝；长期规则按 Nunu 保存，拒绝按用户任务隔离。规则与验证见 [本轮权限记录](docs/reviews/2026-10-22-per-agent-permissions.md)。
+
+沙箱与权限的长期维护入口：[技术架构与产品规则](docs/sandbox/README.md)。修改执行、授权、工作区或审批行为时同步更新该目录；历史 reviews 保留阶段验收记录。
