@@ -1,6 +1,8 @@
+import type { AgentAvatarMaterial } from "./nunu-appearance";
+import { nunuRigProfile } from "./nunu-rig-profile";
 import type { NunuPose } from "./nunu-animation";
 
-// Coordinates are authored against the 1254px plush original. A dense mesh keeps
+// Landmarks are authored per material against the 1254px originals. A dense mesh keeps
 // the fur attached to the same surface while shoulders, eyes and feet articulate.
 const VERTEX = `
 attribute vec2 a_uv;
@@ -9,6 +11,10 @@ uniform vec4 u_body; // left arm, right arm, head, bob
 uniform vec4 u_face; // gaze x/y, blink, smile
 uniform vec2 u_feet;
 uniform vec3 u_shape;
+uniform vec4 u_eyes;
+uniform vec2 u_mouth;
+uniform float u_eyeRadius;
+uniform float u_armScale;
 vec2 rotateAt(vec2 p, vec2 pivot, float angle) {
   float c = cos(angle), s = sin(angle);
   vec2 d = p - pivot;
@@ -23,20 +29,20 @@ void main() {
   v_uv = a_uv;
   vec2 source = a_uv * 1254.0;
   vec2 p = source;
-  float leftEye = patch(source, vec2(498.0, 633.0), vec2(38.0, 38.0), vec2(72.0, 72.0));
-  float rightEye = patch(source, vec2(795.0, 633.0), vec2(38.0, 38.0), vec2(72.0, 72.0));
+  float leftEye = patch(source, u_eyes.xy, vec2(u_eyeRadius), vec2(u_eyeRadius + 65.0));
+  float rightEye = patch(source, u_eyes.zw, vec2(u_eyeRadius), vec2(u_eyeRadius + 65.0));
   float eyes = max(leftEye, rightEye);
   p += u_face.xy * eyes;
-  p.y += (633.0-source.y) * u_face.z * eyes;
-  float mouth = patch(source, vec2(642.0, 674.0), vec2(36.0, 18.0), vec2(65.0, 45.0));
-  p.y += (source.y-670.0) * u_face.w * mouth;
+  p.y += ((u_eyes.y-source.y) * leftEye + (u_eyes.w-source.y) * rightEye) * u_face.z;
+  float mouth = patch(source, u_mouth, vec2(52.0, 24.0), vec2(95.0, 70.0));
+  p.y += (source.y-u_mouth.y) * u_face.w * mouth;
   // One connected surface: shoulder weights reach zero inside the torso, so
   // no separated textures, hard cut edges or reconstructed fur are needed.
   float armsY = smoothstep(645.0, 745.0, source.y) * (1.0-smoothstep(900.0, 995.0, source.y));
   float leftArm = (1.0-smoothstep(190.0, 345.0, source.x)) * armsY;
   float rightArm = smoothstep(925.0, 1085.0, source.x) * armsY;
-  p += (rotateAt(source, vec2(290.0, 740.0), u_body.x*.65)-source) * leftArm;
-  p += (rotateAt(source, vec2(975.0, 740.0), u_body.y*.65)-source) * rightArm;
+  p += (rotateAt(source, vec2(290.0, 740.0), u_body.x*u_armScale)-source) * leftArm;
+  p += (rotateAt(source, vec2(975.0, 740.0), u_body.y*u_armScale)-source) * rightArm;
   float upper = 1.0-smoothstep(830.0, 1120.0, source.y);
   p = mix(p, rotateAt(p, vec2(627.0, 950.0), u_body.z), upper);
   float leftFoot = patch(source, vec2(465.0, 1115.0), vec2(80.0, 30.0), vec2(135.0, 80.0));
@@ -69,7 +75,8 @@ export interface NunuRig {
   dispose(): void;
 }
 
-export function createNunuRig(canvas: HTMLCanvasElement, image: HTMLImageElement, shape: readonly [number, number, number], pigment: number[]): NunuRig {
+export function createNunuRig(canvas: HTMLCanvasElement, image: HTMLImageElement, shape: readonly [number, number, number], pigment: number[], material: AgentAvatarMaterial): NunuRig {
+  const profile = nunuRigProfile(material);
   const gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: true });
   if (!gl) throw new Error("Nunu mesh rendering is unavailable");
   const shaders: WebGLShader[] = [];
@@ -130,6 +137,10 @@ export function createNunuRig(canvas: HTMLCanvasElement, image: HTMLImageElement
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.uniform3fv(gl.getUniformLocation(program, "u_shape"), shape);
   gl.uniform3fv(gl.getUniformLocation(program, "u_pigment"), pigment);
+  gl.uniform4fv(gl.getUniformLocation(program, "u_eyes"), profile.eyes);
+  gl.uniform2fv(gl.getUniformLocation(program, "u_mouth"), profile.mouth);
+  gl.uniform1f(gl.getUniformLocation(program, "u_eyeRadius"), profile.eyeRadius);
+  gl.uniform1f(gl.getUniformLocation(program, "u_armScale"), profile.armScale);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   const body = gl.getUniformLocation(program, "u_body");
@@ -144,7 +155,7 @@ export function createNunuRig(canvas: HTMLCanvasElement, image: HTMLImageElement
     draw(pose) {
       gl.uniform4f(body, pose.leftArm, pose.rightArm, pose.head, pose.bob);
       gl.uniform4f(face, pose.gazeX, pose.gazeY, pose.blink, pose.smile);
-      gl.uniform2f(feet, pose.leftFoot, pose.rightFoot);
+      gl.uniform2f(feet, pose.leftFoot * profile.footScale, pose.rightFoot * profile.footScale);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
     },

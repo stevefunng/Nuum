@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { BODY_ASSETS, NUNU_SHAPE_PROFILES, resolveAgentAvatarColor, resolveAgentAvatarShape, resolveAgentAvatarMaterial, resolveNunuPigment } from "./nunu-appearance";
-import { NUNU_ACTIONS, NUNU_REST, NunuMotionPlayer, type NunuAction } from "./nunu-animation";
+import { NunuActionBag, NUNU_REST, NunuMotionPlayer, type NunuAction } from "./nunu-animation";
 import { createNunuRig, type NunuRig } from "./nunu-rig";
 
 export function NunuPortrait({ agentId, color, shape, material, reaction }: { agentId: string; color?: string | null; shape?: string | null; material?: string | null; reaction: number }) {
@@ -9,18 +9,25 @@ export function NunuPortrait({ agentId, color, shape, material, reaction }: { ag
   const surface = resolveAgentAvatarMaterial(agentId, material);
   const source = BODY_ASSETS[surface === "aurora" ? "glass" : surface];
   const canvas = useRef<HTMLCanvasElement>(null);
-  const request = useRef<(action: NunuAction) => void>(() => {});
+  const request = useRef<() => void>(() => {});
   const [ready, setReady] = useState(false);
   useEffect(() => {
     const element = canvas.current;
     if (!element) return;
     setReady(false);
     const player = new NunuMotionPlayer();
+    const actions = new NunuActionBag();
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");
     let rig: NunuRig | null = null;
     let pendingStart: NunuAction | null = null;
     let frame = 0;
     let disposed = false;
+    const scheduleIdle = () => {
+      clearTimeout(idleTimer);
+      if (disposed || !rig || query.matches || document.hidden) return;
+      idleTimer = setTimeout(() => request.current(), 2800 + Math.random() * 3200);
+    };
     const draw = (now: number) => {
       frame = 0;
       if (!rig) return;
@@ -31,9 +38,10 @@ export function NunuPortrait({ agentId, color, shape, material, reaction }: { ag
       if (current) {
         if (element.dataset.action !== current.action) element.dataset.action = current.action;
         frame = requestAnimationFrame(draw);
-      }
+      } else scheduleIdle();
     };
     const stop = () => {
+      clearTimeout(idleTimer);
       cancelAnimationFrame(frame);
       frame = 0;
       pendingStart = null;
@@ -41,8 +49,10 @@ export function NunuPortrait({ agentId, color, shape, material, reaction }: { ag
       rig?.draw(NUNU_REST);
       element.dataset.playing = "false";
     };
-    request.current = action => {
+    request.current = () => {
       if (query.matches || document.hidden) return;
+      clearTimeout(idleTimer);
+      const action = actions.next();
       if (!rig) { pendingStart = action; return; }
       player.request(action, performance.now());
       if (!frame) frame = requestAnimationFrame(draw);
@@ -52,11 +62,15 @@ export function NunuPortrait({ agentId, color, shape, material, reaction }: { ag
     const setup = () => {
       if (disposed) return;
       try {
-        rig = createNunuRig(element, image, NUNU_SHAPE_PROFILES[bodyShape], resolveNunuPigment(ink.value, surface));
+        rig = createNunuRig(element, image, NUNU_SHAPE_PROFILES[bodyShape], resolveNunuPigment(ink.value, surface), surface);
         rig.resize();
         rig.draw(NUNU_REST);
         setReady(true);
-        if (pendingStart) { request.current(pendingStart); pendingStart = null; }
+        if (pendingStart) {
+          player.request(pendingStart, performance.now());
+          pendingStart = null;
+          frame = requestAnimationFrame(draw);
+        } else scheduleIdle();
       } catch {
         // Keep the full-resolution still visible if graphics acceleration fails.
         rig?.dispose();
@@ -70,8 +84,8 @@ export function NunuPortrait({ agentId, color, shape, material, reaction }: { ag
       rig?.draw(player.sample(performance.now())?.pose ?? NUNU_REST);
     });
     resize.observe(element);
-    const reduced = () => { if (query.matches) stop(); };
-    const visibility = () => { if (document.hidden) stop(); };
+    const reduced = () => { if (query.matches) stop(); else scheduleIdle(); };
+    const visibility = () => { if (document.hidden) stop(); else scheduleIdle(); };
     const lost = (event: Event) => { event.preventDefault(); stop(); rig = null; setReady(false); };
     element.addEventListener("webglcontextlost", lost);
     element.addEventListener("webglcontextrestored", setup);
@@ -88,9 +102,9 @@ export function NunuPortrait({ agentId, color, shape, material, reaction }: { ag
       query.removeEventListener("change", reduced);
       document.removeEventListener("visibilitychange", visibility);
     };
-  }, [source, bodyShape, ink.value, surface]);
+  }, [agentId, source, bodyShape, ink.value, surface]);
   useEffect(() => {
-    if (reaction) request.current(NUNU_ACTIONS[(reaction - 1) % NUNU_ACTIONS.length]!);
+    if (reaction) request.current();
   }, [reaction]);
   return <span className="nunu-portrait" aria-hidden="true" data-ready={ready} data-material={surface} data-shape={bodyShape}>
     <span className="nunu-portrait__media">

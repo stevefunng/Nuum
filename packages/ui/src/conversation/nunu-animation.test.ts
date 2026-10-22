@@ -52,3 +52,21 @@ test("gestures respond within 150ms and finish in at most 1.4 seconds", () => {
   assert.ok(sampleNunuPose("think", 250).gazeX < -15);
   assert.ok(sampleNunuPose("think", 850).gazeX > 15, "thinking looks both ways");
 });
+
+test("six gestures shuffle without repeats within a round or across its boundary", async () => {
+  const { NunuActionBag } = await import("./nunu-animation");
+  const bag = new NunuActionBag(() => .42);
+  let previous: string | undefined;
+  for (let round = 0; round < 10; round++) {
+    const actions = Array.from({ length: 6 }, () => bag.next());
+    assert.equal(new Set(actions).size, 6);
+    assert.notEqual(actions[0], previous);
+    previous = actions[5];
+  }
+});
+
+test("thinking keeps the hand outside the torso instead of folding it inward", () => {
+  for (let ms = 0; ms <= NUNU_DURATIONS.think; ms++) {
+    assert.ok(sampleNunuPose("think", ms).rightArm <= .3);
+  }
+});

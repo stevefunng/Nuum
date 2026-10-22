@@ -1,6 +1,6 @@
-export const NUNU_ACTIONS = ["wave", "think", "cheer", "sleepy"] as const;
+export const NUNU_ACTIONS = ["wave", "think", "cheer", "sleepy", "nod", "sway"] as const;
 export type NunuAction = (typeof NUNU_ACTIONS)[number];
-export const NUNU_DURATIONS: Record<NunuAction, number> = { wave: 900, think: 1250, cheer: 1050, sleepy: 1400 };
+export const NUNU_DURATIONS: Record<NunuAction, number> = { wave: 900, think: 1250, cheer: 1050, sleepy: 1400, nod: 1100, sway: 1300 };
 export const NUNU_REST = { leftArm: 0, rightArm: 0, head: 0, gazeX: 0, gazeY: 0, blink: 0, smile: 0, bob: 0, leftFoot: 0, rightFoot: 0 };
 export type NunuPose = typeof NUNU_REST;
 
@@ -40,7 +40,8 @@ export function sampleNunuPose(action: NunuAction, elapsed: number): NunuPose {
       pose.gazeX = track(t, [[0,0],[.18,-25],[.4,-25],[.58,22],[.72,22],[1,0]]);
       pose.gazeY = -12 * envelope;
       pose.head = -pose.gazeX / 280;
-      pose.rightArm = 1.85 * envelope;
+      // Inward rotation must stay shallow: the connected mesh cannot overlap the torso.
+      pose.rightArm = .28 * envelope;
       pose.leftArm = -.15 * envelope;
       pose.blink = blinkPulse(t, .48, .09);
       break;
@@ -53,6 +54,27 @@ export function sampleNunuPose(action: NunuAction, elapsed: number): NunuPose {
       pose.bob = -48*jump(0,.46)-32*jump(.44,.9);
       pose.leftFoot = .25 * envelope;
       pose.rightFoot = -.25 * envelope;
+      break;
+    }
+    case "nod":
+      pose.gazeY = 12 * envelope;
+      pose.head = .035 * Math.sin(t * Math.PI * 4) * envelope;
+      pose.bob = 12 * (1 - Math.cos(t * Math.PI * 4)) * envelope;
+      pose.blink = blinkPulse(t, .3, .12) + blinkPulse(t, .7, .12);
+      pose.smile = .25 * envelope;
+      pose.leftArm = .2 * envelope;
+      pose.rightArm = -.2 * envelope;
+      break;
+    case "sway": {
+      const swing = Math.sin(t * Math.PI * 4) * envelope;
+      pose.head = .065 * swing;
+      pose.gazeX = 14 * swing;
+      pose.leftArm = .3 * envelope + .2 * swing;
+      pose.rightArm = -.3 * envelope + .2 * swing;
+      pose.leftFoot = .08 * swing;
+      pose.rightFoot = -.08 * swing;
+      pose.smile = .3 * envelope;
+      pose.blink = blinkPulse(t, .65, .1);
       break;
     }
     case "sleepy":
@@ -88,4 +110,27 @@ export class NunuMotionPlayer {
   }
 
   reset() { this.active = null; this.pending = null; }
+}
+
+/** Share one shuffled deck between idle and click gestures. */
+export class NunuActionBag {
+  private remaining: NunuAction[] = [];
+  private previous: NunuAction | undefined;
+  constructor(private random: () => number = Math.random) {}
+
+  next(): NunuAction {
+    if (!this.remaining.length) {
+      this.remaining = [...NUNU_ACTIONS];
+      for (let i = this.remaining.length - 1; i > 0; i--) {
+        const j = Math.floor(this.random() * (i + 1));
+        [this.remaining[i], this.remaining[j]] = [this.remaining[j]!, this.remaining[i]!];
+      }
+      const last = this.remaining.length - 1;
+      if (this.remaining[last] === this.previous) {
+        [this.remaining[0], this.remaining[last]] = [this.remaining[last]!, this.remaining[0]!];
+      }
+    }
+    this.previous = this.remaining.pop()!;
+    return this.previous;
+  }
 }
