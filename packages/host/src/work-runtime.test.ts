@@ -35,8 +35,8 @@ async function runtime(t: TestContext, kernel: KernelClient = quietKernel): Prom
 test("a Nunu can join multiple rooms and membership survives restart projections", async (t) => {
   const host = await runtime(t);
   const agent = await host.createAgent({ name: "Builder" });
-  const first = await host.createWork({ name: "First", description: "", projectRoot: null });
-  const second = await host.createWork({ name: "Second", description: "", projectRoot: null });
+  const first = await host.createWork({ name: "First" });
+  const second = await host.createWork({ name: "Second" });
   await host.attachWorkMember({ workId: first.id, agentId: agent.profile.id, role: "worker", expectedRevision: 0 });
   await host.attachWorkMember({ workId: second.id, agentId: agent.profile.id, role: "worker", expectedRevision: 0 });
   assert.equal((await host.getWork(first.id)).members.length, 1);
@@ -50,7 +50,7 @@ test("a Nunu can join multiple rooms and membership survives restart projections
 
 test("task mutations use revision CAS and the centralized transition policy", async (t) => {
   const host = await runtime(t);
-  const work = await host.createWork({ name: "Launch", description: "", projectRoot: null });
+  const work = await host.createWork({ name: "Launch" });
   const task = await host.createWorkTask({
     workId: work.id,
     title: "Ship",
@@ -101,7 +101,7 @@ test("task mutations use revision CAS and the centralized transition policy", as
 
 test("chat and catalog remain Work-owned projections", async (t) => {
   const host = await runtime(t);
-  const work = await host.createWork({ name: "Launch", description: "", projectRoot: null });
+  const work = await host.createWork({ name: "Launch" });
   await host.postWorkMessage({ workId: work.id, body: "Status?", mentionedAgentIds: [] });
   const catalog = await host.addWorkCatalogEntry({
     workId: work.id,
@@ -129,7 +129,7 @@ test("dispatch keeps card history separate and handoff returns to Work", async (
   const host = await runtime(t, kernel);
   await host.setSettings({ deepseekApiKey: "test-key" });
   const agent = await host.createAgent({ name: "Builder" });
-  const work = await host.createWork({ name: "Launch", description: "Ship it", projectRoot: null });
+  const work = await host.createWork({ name: "Launch" });
   await host.attachWorkMember({ workId: work.id, agentId: agent.profile.id, role: "worker", expectedRevision: 0 });
   const task = await host.createWorkTask({
     workId: work.id,
@@ -184,7 +184,7 @@ test("room silence advances input while card traces stay isolated and resume", a
   await host.setSettings({ deepseekApiKey: "test-key" });
   const agent = await host.createAgent({ name: "Builder" });
   const id = agent.profile.id;
-  const work = await host.createWork({ name: "Room", description: "", projectRoot: null });
+  const work = await host.createWork({ name: "Room" });
   await host.attachWorkMember({ workId: work.id, agentId: id, role: "worker", expectedRevision: 0 });
   const waitIdle = async () => {
     for (let i = 0; i < 100; i++) { if (!host.scheduler.isBusy(id)) return; await new Promise((resolve) => setTimeout(resolve, 10)); }
@@ -217,7 +217,7 @@ test("room silence advances input while card traces stay isolated and resume", a
 test("SendMessage in a card run publishes one atomic handoff, not a private reply", async (t) => {
   const host = await runtime(t);
   const agent = await host.createAgent({ name: "Builder" });
-  const work = await host.createWork({ name: "Launch", description: "", projectRoot: null });
+  const work = await host.createWork({ name: "Launch" });
   await host.attachWorkMember({ workId: work.id, agentId: agent.profile.id, role: "worker", expectedRevision: 0 });
   const task = await host.createWorkTask({ workId: work.id, title: "Build", description: "", acceptanceCriteria: [], assigneeIds: [agent.profile.id], dependencyIds: [], priority: "normal" });
   const ready = task;
@@ -242,7 +242,7 @@ test("room re-entry provides the recent 24 messages and explicitly marks omitted
   const host = await runtime(t, { ...quietKernel, start: async (params) => { starts.push(params); return { ok: true }; } });
   await host.setSettings({ deepseekApiKey: "test-key" });
   const agent = await host.createAgent({ name: "Reader" });
-  const work = await host.createWork({ name: "Backlog", description: "", projectRoot: null });
+  const work = await host.createWork({ name: "Backlog" });
   await host.attachWorkMember({ workId: work.id, agentId: agent.profile.id, role: "worker", expectedRevision: 0 });
   for (let i = 0; i < 30; i++) await historyMessage(host, work.id, `pending-message-${i}`);
   await host.dispatchWork({ workId: work.id, agentId: agent.profile.id, instruction: "Respond to the latest message" });
@@ -260,7 +260,7 @@ test("a queued card cannot start after the user cancels it", async (t) => {
   const host = await runtime(t, { ...quietKernel, onEvent: (handler) => { emit = handler; }, start: async (params) => { starts.push(params); return { ok: true }; } });
   await host.setSettings({ deepseekApiKey: "test-key" });
   const agent = await host.createAgent({ name: "Builder" });
-  const work = await host.createWork({ name: "Queue", description: "", projectRoot: null });
+  const work = await host.createWork({ name: "Queue" });
   await host.attachWorkMember({ workId: work.id, agentId: agent.profile.id, role: "worker", expectedRevision: 0 });
   const running = await host.dispatchWork({ workId: work.id, agentId: agent.profile.id, instruction: "Discuss" });
   const task = await host.createWorkTask({ workId: work.id, title: "Cancelled card", description: "", acceptanceCriteria: [], assigneeIds: [agent.profile.id], dependencyIds: [], priority: "normal" });
@@ -274,19 +274,24 @@ test("a queued card cannot start after the user cancels it", async (t) => {
 });
 
 test("creator remains owner, worker returns to its card session, blocked requires human resume", async (t) => {
+  let emit: (method: string, params: unknown) => void = () => {};
   const starts: import("@nuum/protocol").TurnStartParams[] = [];
-  const host = await runtime(t, { ...quietKernel, start: async (params) => { starts.push(params); return { ok: true }; } });
+  const host = await runtime(t, { ...quietKernel, onEvent: handler => { emit = handler; }, start: async (params) => { starts.push(params); return { ok: true }; } });
   await host.setSettings({ deepseekApiKey: "test-key" });
   const a = (await host.createAgent({ name: "Owner" })).profile.id;
   const b = (await host.createAgent({ name: "Worker" })).profile.id;
-  const work = await host.createWork({ name: "Delivery", description: "", projectRoot: null });
+  const work = await host.createWork({ name: "Delivery" });
   for (const id of [a,b]) await host.attachWorkMember({ workId: work.id, agentId: id, role: "worker", expectedRevision: 0 });
   const ctx = (agentId: string, taskId?: string, toolCallId = "create") => ({ agentId, assistantId: "assistant", toolCallId, runContext: { kind: "work" as const, workId: work.id, taskId, triggerEventId: "trigger", catalogRevision: 0, catalog: [], requestedBy: { kind: "user" as const, id: "local-user" } } });
   const task = JSON.parse(await host.createTaskFromModel(a, { title: "Build", description: "", acceptanceCriteria: [], assigneeIds: [] }, ctx(a)));
   assert.equal(task.ownerAgentId, a);
   await host.delegateWork(a, { agent_id: b, task_id: task.id, instruction: "Build component" }, ctx(a, task.id, "delegate"));
   assert.equal((await host.getWork(work.id)).tasks[0]!.ownerAgentId, a);
+  for (let i = 0; i < 100 && starts.length < 1; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(starts.length, 1);
   await host.sendWorkMessage(b, { type: "text", content: "Worker result", cardAction: { status: "review", deliverables: [] } }, ctx(b, task.id, "result"));
+  // Shared room roots serialize runs; delivery does not release the worker slot until turn.ended.
+  emit("turn.ended", { runId: starts[0]!.runId, status: "idle" });
   for (let i = 0; i < 100 && starts.length < 2; i++) await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(starts.length, 2);
   assert.match(JSON.stringify(starts[1]!.messages), /Worker result/);
@@ -307,7 +312,7 @@ test("room discussion rotates, picks up agent mentions next round and stops on s
   await host.setSettings({ deepseekApiKey: "test-key" });
   const a = (await host.createAgent({ name: "Alice" })).profile.id;
   const b = (await host.createAgent({ name: "Bob" })).profile.id;
-  const work = await host.createWork({ name: "Discussion", kind: "room", description: "", projectRoot: null });
+  const work = await host.createWork({ name: "Discussion", kind: "room" });
   for (const id of [a,b]) await host.attachWorkMember({ workId: work.id, agentId: id, role: "worker", expectedRevision: 0 });
   const waitStarts = async (count: number) => { for (let i=0; i<100 && starts.length<count; i++) await new Promise(resolve => setTimeout(resolve, 10)); assert.equal(starts.length, count); };
   await host.postWorkMessage({ workId: work.id, body: "@Alice start", mentionedAgentIds: [] });
@@ -335,7 +340,7 @@ test("discussion stops at ten public messages even when every member keeps speak
   const starts: import("@nuum/protocol").TurnStartParams[] = [];
   const host = await runtime(t, { ...quietKernel, onEvent: handler => { emit = handler; }, start: async params => { starts.push(params); return { ok: true }; } });
   await host.setSettings({ deepseekApiKey: "test-key" });
-  const work = await host.createWork({ name: "Bounded", kind: "room", description: "", projectRoot: null });
+  const work = await host.createWork({ name: "Bounded", kind: "room" });
   for (let i=0; i<6; i++) {
     const id = (await host.createAgent({ name: `Member ${i}` })).profile.id;
     await host.attachWorkMember({ workId: work.id, agentId: id, role: "worker", expectedRevision: 0 });
@@ -359,7 +364,7 @@ test("a new user message preserves publication from the already started member",
   const host = await runtime(t, { ...quietKernel, start: async params => { starts.push(params); return { ok: true }; } });
   await host.setSettings({ deepseekApiKey: "test-key" });
   const id = (await host.createAgent({ name: "Reader" })).profile.id;
-  const work = await host.createWork({ name: "Epoch", kind: "room", description: "", projectRoot: null });
+  const work = await host.createWork({ name: "Epoch", kind: "room" });
   await host.attachWorkMember({ workId: work.id, agentId: id, role: "worker", expectedRevision: 0 });
   await host.postWorkMessage({ workId: work.id, body: "First", mentionedAgentIds: [] });
   for (let i=0; i<100 && !starts.length; i++) await new Promise(resolve => setTimeout(resolve, 10));
@@ -374,7 +379,7 @@ test("NunuBar wakes without a mention just like a local room", async (t) => {
   const host = await runtime(t, { ...quietKernel, start: async params => { starts.push(params); return { ok: true }; } });
   await host.setSettings({ deepseekApiKey: "test-key" });
   const id = (await host.createAgent({ name: "Responder" })).profile.id;
-  const work = await host.createWork({ name: "Bar", kind: "work", description: "", projectRoot: null });
+  const work = await host.createWork({ name: "Bar", kind: "work" });
   await host.attachWorkMember({ workId: work.id, agentId: id, role: "worker", expectedRevision: 0 });
   await host.postWorkMessage({ workId: work.id, body: "Please discuss", mentionedAgentIds: [] });
   for (let i = 0; i < 50 && !starts.length; i++) await new Promise(resolve => setTimeout(resolve, 10));
@@ -408,7 +413,7 @@ test("restart does not replay an uncertain discussion; explicit continue opens a
   const first = await runtime(t, { ...quietKernel, start: async params => { firstStarts.push(params); return { ok: true }; } });
   await first.setSettings({ deepseekApiKey: "test-key" });
   const agent = await first.createAgent({ name: "A" });
-  const work = await first.createWork({ name: "Restart", kind: "room", description: "", projectRoot: null });
+  const work = await first.createWork({ name: "Restart", kind: "room" });
   await first.attachWorkMember({ workId: work.id, agentId: agent.profile.id, role: "worker", expectedRevision: 0 });
   await first.postWorkMessage({ workId: work.id, body: "Discuss", mentionedAgentIds: [] });
   await until(() => firstStarts.length === 1, "first start");
@@ -427,7 +432,7 @@ test("an uncertain card stays stopped after restart and resumes its existing pri
   const first = await runtime(t);
   await first.setSettings({ deepseekApiKey: "test-key" });
   const agent = await first.createAgent({ name: "Worker" });
-  const work = await first.createWork({ name: "Card restart", description: "", projectRoot: null });
+  const work = await first.createWork({ name: "Card restart" });
   await first.attachWorkMember({ workId: work.id, agentId: agent.profile.id, role: "worker", expectedRevision: 0 });
   const task = await first.createWorkTask({ workId: work.id, title: "Build", description: "", acceptanceCriteria: [], assigneeIds: [agent.profile.id], dependencyIds: [], priority: "normal" });
   await first.dispatchWork({ workId: work.id, taskId: task.id, agentId: agent.profile.id, instruction: "Build safely" });
@@ -448,7 +453,7 @@ test("explicit stop rejects late replies and is not resurrected after restart", 
   const first = await runtime(t, { ...quietKernel, start: async params => { firstStarts.push(params); return { ok: true }; } });
   await first.setSettings({ deepseekApiKey: "test-key" });
   const agentId = (await first.createAgent({ name: "A" })).profile.id;
-  const work = await first.createWork({ name: "Stop", kind: "room", description: "", projectRoot: null });
+  const work = await first.createWork({ name: "Stop", kind: "room" });
   await first.attachWorkMember({ workId: work.id, agentId, role: "worker", expectedRevision: 0 });
   await first.postWorkMessage({ workId: work.id, body: "Discuss", mentionedAgentIds: [] });
   await until(() => firstStarts.length === 1, "start");
@@ -466,7 +471,7 @@ test("a single card cannot acquire a second worker before the first result", asy
   await host.setSettings({ deepseekApiKey: "test-key" });
   const a = (await host.createAgent({ name: "A" })).profile.id;
   const b = (await host.createAgent({ name: "B" })).profile.id;
-  const work = await host.createWork({ name: "Serial card", description: "", projectRoot: null });
+  const work = await host.createWork({ name: "Serial card" });
   for (const agentId of [a, b]) await host.attachWorkMember({ workId: work.id, agentId, role: "worker", expectedRevision: 0 });
   const task = await host.createWorkTask({ workId: work.id, title: "Build", description: "", acceptanceCriteria: [], assigneeIds: [], dependencyIds: [], priority: "normal" });
   await host.dispatchWork({ workId: work.id, taskId: task.id, agentId: a, instruction: "Build" });
@@ -475,7 +480,7 @@ test("a single card cannot acquire a second worker before the first result", asy
 
 test("snapshot watermark matches its full log prefix including non-chat events", async (t) => {
   const host = await runtime(t);
-  const work = await host.createWork({ name: "Ordered", description: "", projectRoot: null });
+  const work = await host.createWork({ name: "Ordered" });
   const agent = await host.createAgent({ name: "A" });
   await historyMessage(host, work.id, "First");
   await host.attachWorkMember({ workId: work.id, agentId: agent.profile.id, role: "worker", expectedRevision: 0 });
@@ -491,7 +496,7 @@ test("stopping an agent whose discussion is queued stops the entire discussion",
   await host.setSettings({ deepseekApiKey: "test-key" });
   const a = (await host.createAgent({ name: "A" })).profile.id;
   const b = (await host.createAgent({ name: "B" })).profile.id;
-  const work = await host.createWork({ name: "Queued stop", kind: "room", description: "", projectRoot: null });
+  const work = await host.createWork({ name: "Queued stop", kind: "room" });
   for (const agentId of [a, b]) await host.attachWorkMember({ workId: work.id, agentId, role: "worker", expectedRevision: 0 });
   await host.send(a, "Hold the main slot");
   await host.postWorkMessage({ workId: work.id, body: "Discuss", mentionedAgentIds: [] });

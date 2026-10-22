@@ -15,6 +15,7 @@ export const DesktopMethods = {
   workspacePick: "workspace.pick",
   secretsGet: "secrets.get",
   secretsSet: "secrets.set",
+  shellOpenPath: "shell.openPath",
   shellOpenExternal: "shell.openExternal"
 } as const;
 

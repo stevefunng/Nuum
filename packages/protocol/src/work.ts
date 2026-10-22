@@ -7,6 +7,7 @@ export const WorkProfile = z.object({
   description: z.string(),
   avatar: z.string().optional(),
   projectRoot: z.string().nullable(),
+  workspaceId: z.string().optional(),
   createdAt: z.number()
 });
 export type WorkProfile = z.infer<typeof WorkProfile>;

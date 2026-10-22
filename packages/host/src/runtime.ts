@@ -1,14 +1,17 @@
+import { permissionOperationKey } from "@nuum/protocol";
+import { WorkspaceStore } from "./workspaces.js";
+import { executionPolicy, recoverExecutionResult } from "./execution-recovery.js";
+import { ExecutorClient } from "./executor-client.js";
+import type { ExecutionEndpoint, ExecutionContext, ExecutionResult, ExecutionRecord } from "@nuum/protocol";
 import { summarizePrefix } from "./compaction.js";
 import { discussionResponders, runDiscussion, isPass, discussionLimits } from "./room-discussion.js";
 import { workIntent, currentCardSource, pendingCardDelegation } from "./work-execution.js";
 import { selectRoomInput } from "./room-context.js";
 import { SessionStore } from "./session-store.js";
 import type { TranscriptDraft, WorkSendMessageParams, CreateTaskParams, ClaimTaskParams, ReadTaskParams, WorkActor } from "@nuum/protocol";
-import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir, platform, release } from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import {
   DEFAULT_AGENT_NAME,
   DelegatedToolNames,
@@ -116,12 +119,14 @@ import { allowedTaskTransitions, assertTaskTransition } from "./work-task-policy
  * 这个量级；真扫不到说明这条转录里根本没有唤醒链，当 0 手是对的。
  */
 const HOPS_SCAN_LIMIT = 200;
-const execFileAsync = promisify(execFile);
 
 export type { DelegatedTool };
 
 export interface HostRuntimeOptions {
   dataDir: string;
+  documentsDir?: string;
+  privateDir?: string;
+  executorEntry?: string;
   kernelCommand: string;
   kernelArgs: string[];
   expert?: ExpertPort | null;
@@ -135,6 +140,9 @@ export interface HostRuntimeOptions {
 
 export class HostRuntime implements Partial<DelegateHost> {
   readonly store: AgentStore;
+  private readonly workspaces: WorkspaceStore;
+  private readonly executor?: ExecutorClient;
+  private readonly executionContexts = new Map<string, ExecutionContext>();
   readonly workStore: WorkStore;
   readonly sessions: SessionStore;
   readonly scheduler: AgentScheduler;
@@ -165,6 +173,8 @@ export class HostRuntime implements Partial<DelegateHost> {
 
   constructor(private readonly options: HostRuntimeOptions) {
     this.store = new AgentStore(options.dataDir);
+    this.workspaces = new WorkspaceStore(options.dataDir, options.documentsDir ?? path.join(options.dataDir, "Documents"));
+    if (options.executorEntry) this.executor = new ExecutorClient(options.dataDir, options.executorEntry);
     this.workStore = new WorkStore(options.dataDir);
     this.sessions = new SessionStore(options.dataDir);
     this.proactive = new ProactiveService(this.store, () => this.settings.defaultModel, (agentId) => {
@@ -189,6 +199,38 @@ export class HostRuntime implements Partial<DelegateHost> {
     await this.workStore.migrateMemberships(this.store.listAgents());
     await this.workStore.migrateExecutionHistory();
     this.settings = await this.store.readSettings();
+    await this.workspaces.init();
+    for (const record of this.store.listAgents()) await this.ensurePersonalWorkspace(record);
+    for (const room of this.workStore.listWorks()) {
+      const workspace = await this.workspaces.ensure(`room:${room.id}`, room.name, "room", room.projectRoot);
+      await this.workStore.updateWork(room.id, { projectRoot: workspace.root, workspaceId: workspace.id });
+    }
+    if (this.executor) {
+      const adopted = await this.executor.start();
+      // Restore authority before accepting new model turns. Only unchanged managed roots may survive adoption.
+      for (const context of adopted.contexts) {
+        const agent = this.store.getAgent(context.agentId);
+        const rooms = this.workStore.listWorks().filter(room => this.workStore.membership(room.id, context.agentId).binding);
+        const workspaceMatches = (context.workspaceId === agent?.settings.execution?.workspaceId && context.root === agent?.settings.workspace?.projectRoot) ||
+          rooms.some(room => room.workspaceId === context.workspaceId && room.projectRoot === context.root);
+        if (!agent) await this.executor.rpc("revoke", { contextId: context.id });
+        else {
+          const workId = context.origin?.workId;
+          const roomCurrent = !workId || (rooms.some(room => room.id === workId) &&
+            context.origin?.membershipRevision === this.workStore.membership(workId, context.agentId).revision &&
+            context.origin?.catalogRevision === (await this.workStore.readCatalog(workId)).revision);
+          const authorized = workspaceMatches && roomCurrent && agent.settings.execution &&
+            context.commands === agent.settings.execution.commands &&
+            context.policy === executionPolicy(agent.settings.execution);
+          if (!authorized) await this.executor.rpc("suspend", { contextId: context.id });
+          this.executionContexts.set(context.id, context);
+          const held = this.scheduler.submit({ agentId: context.agentId, projectRoot: context.root, context: DIRECT_RUN_CONTEXT,
+            start: async runId => { await this.waitForRecoveredExecution(context); this.scheduler.settle(runId, "failed"); }
+          });
+          this.background(held.completed);
+        }
+      }
+    }
     this.attachKernel();
     this.proactive.start();
     // 重放放最后：它要 kernel 在位，而且不该拖慢 RPC 上线。
@@ -203,10 +245,21 @@ export class HostRuntime implements Partial<DelegateHost> {
     this.compactJobs.clear();
     await Promise.allSettled(summaryRuns.map(runId => this.kernel?.cancelSummary?.(`${runId}:compact`)));
     await this.proactive.dispose();
+    await this.executor?.stop();
     await Promise.allSettled([...this.pending, ...this.kernelEventChains.values()]);
     this.kernel?.dispose();
     this.kernel = null;
     await this.store.dispose();
+  }
+
+  async detach(): Promise<void> {
+    this.disposing = true;
+    this.scheduler.close();
+    this.executor?.detach();
+    this.kernel?.dispose();
+    this.kernel = null;
+    await this.proactive.dispose();
+    // Process exit releases ownership; do not release the store marker while outstanding writes may still exist.
   }
 
   private attachKernel(): void {
@@ -218,7 +271,15 @@ export class HostRuntime implements Partial<DelegateHost> {
     client.onExit?.(() => {
       if (this.disposing || this.kernel !== client) return;
       this.kernel = null;
-      this.scheduler.close();
+      for (const runId of this.scheduler.activeRunIds()) {
+        const context = this.executionContexts.get(runId);
+        if (context && this.executor) this.background((async () => {
+          // Drain already received result events before recovery checks the transcript for duplicates.
+          await this.kernelEventChains.get(runId)?.catch(() => undefined);
+          await this.waitForRecoveredExecution(context);
+        })().finally(() => this.scheduler.settle(runId, "failed")));
+        else this.scheduler.settle(runId, "failed");
+      }
       this.emit(HostEvents.kernelDown, { at: Date.now() });
     });
     void client.hello().catch(() => {
@@ -285,9 +346,18 @@ export class HostRuntime implements Partial<DelegateHost> {
       },
       settings
     );
-    const view = await this.viewFor(record);
+    await this.ensurePersonalWorkspace(record);
+    const view = await this.viewFor(this.store.requireAgent(record.profile.id));
     this.emit(HostEvents.agentUpdated, { agent: view });
     return view;
+  }
+
+  private async ensurePersonalWorkspace(record: AgentRecord): Promise<void> {
+    const workspace = await this.workspaces.ensure(`agent:${record.profile.id}`, record.profile.name, "personal", record.settings.workspace?.projectRoot);
+    await this.store.updateAgent(record.profile.id, { settings: {
+      workspace: { projectRoot: workspace.root, toolPermission: record.settings.workspace?.toolPermission ?? null },
+      execution: { workspaceId: workspace.id, commands: "ask", commandGrants: [], networkGrants: [], ...record.settings.execution }
+    } });
   }
 
   async listAgents(): Promise<AgentView[]> {
@@ -318,7 +388,17 @@ export class HostRuntime implements Partial<DelegateHost> {
     if (params.avatarMaterial !== undefined) profile.avatarMaterial = params.avatarMaterial;
     const settings: Record<string, unknown> = {};
     if (params.model !== undefined) settings.model = params.model;
-    if (params.workspace !== undefined) settings.workspace = params.workspace;
+    if (params.workspace !== undefined) {
+      const current = this.store.requireAgent(params.id);
+      if (params.workspace.projectRoot !== current.settings.workspace?.projectRoot) throw new Error("Workspace paths are Host-managed");
+      settings.workspace = params.workspace;
+    }
+    if (params.execution !== undefined) {
+      const current = this.store.requireAgent(params.id).settings.execution;
+      if (!current || current.workspaceId !== params.execution.workspaceId) throw new Error("Workspace ownership cannot be edited");
+      await this.revokeAgentExecution(params.id);
+      settings.execution = params.execution;
+    }
     if (params.hiddenFromSidebar !== undefined) settings.hiddenFromSidebar = params.hiddenFromSidebar;
     const record = await this.store.updateAgent(params.id, {
       ...(Object.keys(profile).length ? { profile } : {}),
@@ -331,6 +411,7 @@ export class HostRuntime implements Partial<DelegateHost> {
 
   async deleteAgent(id: string): Promise<{ ok: true }> {
     await this.cancel(id);
+    await this.revokeAgentExecution(id);
     const cleanup = this.kernel
       ?.disposeShell(path.join(this.store.agentDir(id), "terminals"))
       .then(() => undefined, () => undefined);
@@ -356,12 +437,15 @@ export class HostRuntime implements Partial<DelegateHost> {
   // ── Work 生命周期与投影 ─────────────────────────────────────────────────
 
   async createWork(params: WorkCreateParams): Promise<WorkProfile> {
+    const id = crypto.randomUUID();
+    const workspace = await this.workspaces.ensure(`room:${id}`, params.name, "room");
     const profile = await this.workStore.createWork({
-      id: crypto.randomUUID(),
+      id,
       kind: params.kind ?? "work",
       name: params.name.trim(),
-      description: params.description.trim(),
-      projectRoot: params.projectRoot ? path.resolve(params.projectRoot) : null,
+      description: "",
+      projectRoot: workspace.root,
+      workspaceId: workspace.id,
       createdAt: Date.now()
     });
     this.emit(HostEvents.workUpdated, { work: profile });
@@ -384,10 +468,7 @@ export class HostRuntime implements Partial<DelegateHost> {
     const profile = await this.workStore.updateWork(params.id, {
       ...(params.kind ? { kind: params.kind } : {}),
       ...(params.name !== undefined ? { name: params.name.trim() } : {}),
-      ...(params.description !== undefined ? { description: params.description.trim() } : {}),
-      ...(params.projectRoot !== undefined
-        ? { projectRoot: params.projectRoot ? path.resolve(params.projectRoot) : null }
-        : {})
+
     });
     this.emit(HostEvents.workUpdated, { work: profile });
     return profile;
@@ -592,6 +673,7 @@ export class HostRuntime implements Partial<DelegateHost> {
     this.assertMembershipRevision(membership.revision, params.expectedRevision);
     if (!membership.binding) throw new RpcError(HostErrorCode.WORK_CONFLICT, "Not a member of this room");
     this.assertNotRunningWork(params.agentId, params.workId);
+    await this.revokeAgentExecution(params.agentId);
     const event = await this.workStore.appendEvent(params.workId, {
       type: "member.detached", id: crypto.randomUUID(), workId: params.workId, createdAt: Date.now(),
       actor: { kind: "user", id: "local-user" }, membershipOperationId: crypto.randomUUID(),
@@ -929,13 +1011,15 @@ export class HostRuntime implements Partial<DelegateHost> {
           if (estimateContextTokens(assembled) > this.contextWindow(model) * 0.75) throw new Error("Context capacity exhausted; narrow the input before continuing.");
         }
         const approvals = activeContext.kind === "work" && activeContext.session ? { always: [], refused: [] } : await this.store.readApprovals(id);
+        const execution = await this.prepareExecution(id, activeRunId, activeContext);
         await this.kernel!.start({
+          ...(execution ? { execution } : {}),
           runId: activeRunId,
           ...(this.kernel!.provideContext ? { contextWindow: this.contextWindow(model) } : {}),
           messages: assembled,
           model,
           roots,
-          toolPermission: record.settings.workspace?.toolPermission ?? this.settings.defaultToolPermission,
+          toolPermission: record.settings.execution?.commands ?? record.settings.workspace?.toolPermission ?? this.settings.defaultToolPermission,
           approvals: approvals.always,
           refused: approvals.refused,
           // Proactive / Work 的本地工具由各自 capability catalog 显式装配。
@@ -944,6 +1028,8 @@ export class HostRuntime implements Partial<DelegateHost> {
             ? this.toolCache.map((tool) => tool.name)
             : activeContext.kind === "work"
               ? [...new Set([
+                  "request_network",
+                  "external_operation",
                   ...activeContext.catalog
                     .filter((entry) => entry.kind === "local-tool" && entry.enabled)
                     .flatMap((entry) => entry.kind === "local-tool" ? entry.toolNames : []),
@@ -976,6 +1062,7 @@ export class HostRuntime implements Partial<DelegateHost> {
   }
 
   async cancel(id: string): Promise<{ ok: true }> {
+    await this.revokeAgentExecution(id);
     // 只取消这个 agent 的 run，别的 agent 照跑。排着的唤醒一起丢 ——
     // 用户按下停止，意思是「别忙了」，不是「先停这个再接着忙下一个」。
     this.wakes.drop(id);
@@ -1005,7 +1092,7 @@ export class HostRuntime implements Partial<DelegateHost> {
 
   async decide(id: string, toolCallId: string, resolution: ToolResolution): Promise<{ ok: true }> {
     const pending = this.pendingTools.get(pendingKey(id, toolCallId));
-    if (pending && resolution !== "once" && !this.cardSessionFor(id)) {
+    if (!this.executor && pending && resolution !== "once" && !this.cardSessionFor(id)) {
       const stored = await this.store.readApprovals(id);
       const always = stored.always.filter((item) => !sameApproval(item, pending));
       const refused = stored.refused.filter((item) => !sameApproval(item, pending));
@@ -1013,7 +1100,7 @@ export class HostRuntime implements Partial<DelegateHost> {
       if (resolution === "deny" || resolution === "never") refused.push(pending);
       await this.store.writeApprovals(id, { always, refused });
     }
-    if (resolution === "never" && !this.cardSessionFor(id)) {
+    if (!this.executor && resolution === "never" && !this.cardSessionFor(id)) {
       const record = this.store.requireAgent(id);
       const updated = await this.store.updateAgent(id, {
         settings: {
@@ -1028,6 +1115,35 @@ export class HostRuntime implements Partial<DelegateHost> {
     if (!this.kernel) throw new RpcError(HostErrorCode.KERNEL_DOWN, "Kernel is not available");
     const runId = this.scheduler.activeRunFor(id);
     if (!runId) throw new RpcError(HostErrorCode.AGENT_NOT_FOUND, "No running turn to decide on");
+    if (this.executor) {
+      const approval = await this.executor.rpc<ExecutionResult>("status", { id: `${runId}:${toolCallId}` });
+      if (approval.state !== "approval") throw new Error("Approval request is no longer active");
+      if (resolution === "always" && approval.allowAlways === false) throw new Error("This dynamic command can only be allowed once");
+      if (resolution === "always" && approval.grant) {
+        const record = this.store.requireAgent(id);
+        const execution = record.settings.execution!;
+        const grants = execution.externalGrants ?? [];
+        const updated = await this.store.updateAgent(id, { settings: { execution: { ...execution, externalGrants: [...grants.filter(grant => JSON.stringify(grant) !== JSON.stringify(approval.grant)), approval.grant] } } });
+        this.emit(HostEvents.agentUpdated, { agent: await this.viewFor(updated) });
+      }
+      if (!approval.grant && pending?.action === "run-command" && (resolution === "always" || resolution === "never")) {
+        const record = this.store.requireAgent(id);
+        const execution = record.settings.execution!;
+        const context = this.executionContexts.get(runId)!;
+        const commandGrants = resolution === "always" ? [...execution.commandGrants.filter(grant => !(grant.workspaceId === context.workspaceId && grant.command === pending.target)), { workspaceId: context.workspaceId, command: pending.target }] : execution.commandGrants;
+        const updated = await this.store.updateAgent(id, { settings: { execution: { ...execution, commands: resolution === "never" ? "never" : execution.commands, commandGrants } } });
+        this.emit(HostEvents.agentUpdated, { agent: await this.viewFor(updated) });
+      }
+      if (pending?.action === "network" && resolution === "always") {
+        const record = this.store.requireAgent(id);
+        const execution = record.settings.execution!;
+        const context = this.executionContexts.get(runId)!;
+        const networkGrants = [...execution.networkGrants.filter(grant => !(grant.workspaceId === context.workspaceId && grant.target === pending.target)), { workspaceId: context.workspaceId, target: pending.target }];
+        const updated = await this.store.updateAgent(id, { settings: { execution: { ...execution, networkGrants } } });
+        this.emit(HostEvents.agentUpdated, { agent: await this.viewFor(updated) });
+      }
+    }
+    if (this.executor) await this.executor.rpc("decide", { id: `${runId}:${toolCallId}`, allow: resolution === "once" || resolution === "always", remember: resolution === "always", policy: executionPolicy(this.store.requireAgent(id).settings.execution!) });
     this.forgetPending(id, toolCallId);
     await this.kernel.decide({ runId, toolCallId, resolution }, resolution === "deny");
     return { ok: true };
@@ -1241,13 +1357,21 @@ export class HostRuntime implements Partial<DelegateHost> {
     if (subcommand && !capability.allowedSubcommands.includes(subcommand)) {
       throw new RpcError(HostErrorCode.WORK_FORBIDDEN, "That CLI subcommand is not allowed by this Work");
     }
-    const work = this.workStore.getWork(run.workId);
-    const result = await execFileAsync(capability.executable, params.args, {
-      cwd: work.projectRoot ?? undefined,
-      timeout: 120_000,
-      maxBuffer: 1024 * 1024
+    if (!this.executor) throw new Error("Execution daemon is required for CLI capabilities");
+    const runId = this.scheduler.activeRunFor(agentId);
+    if (!runId) throw new Error("No active execution context");
+    const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+    const id = `${runId}:${context.toolCallId}`;
+    const executionContext = this.executionContexts.get(runId);
+    if (!executionContext) throw new Error("Missing execution authorization");
+    let result = await this.executor.rpc<ExecutionResult>("submit", { id, contextId: executionContext.id, name: "shell", input: { command: [capability.executable, ...params.args].map(quote).join(" ") } });
+    if (result.state === "approval") await this.onKernelEvent("turn.tool.pending", {
+      runId, toolCallId: context.toolCallId, name: "RunWorkCLI", arguments: params,
+      mutating: true, action: result.action, target: result.target
     });
-    return [result.stdout, result.stderr].filter(Boolean).join("\n").slice(0, 100_000) || "Command completed.";
+    while (result.state === "running" || result.state === "approval") { await new Promise(resolve => setTimeout(resolve, 100)); result = await this.executor.rpc<ExecutionResult>("status", { id }); }
+    if (result.state !== "finished" || !result.ok) throw new Error(result.state === "finished" ? result.output : "CLI execution did not complete");
+    return result.output;
   }
 
   async delegateWork(
@@ -1299,20 +1423,7 @@ export class HostRuntime implements Partial<DelegateHost> {
       return `Profile updated. You are now "${record.profile.name}".`;
     }
 
-    if (params.target === "settings") {
-      const record = this.store.requireAgent(agentId);
-      const projectRoot = params.project_root?.trim() ? path.resolve(params.project_root) : null;
-      const updated = await this.store.updateAgent(agentId, {
-        settings: {
-          workspace: {
-            projectRoot,
-            toolPermission: record.settings.workspace?.toolPermission ?? null
-          }
-        }
-      });
-      this.emit(HostEvents.agentUpdated, { agent: await this.viewFor(updated) });
-      return projectRoot ? `Project directory set to ${projectRoot}.` : "Project directory cleared.";
-    }
+    if ((params as { target: string }).target === "settings") throw new Error("Execution configuration and workspace ownership can only be changed by the user through Host settings.");
 
     const memory = new MemoryStore(this.store.memoryDir(agentId));
     if (params.action === "forget") {
@@ -1526,6 +1637,7 @@ export class HostRuntime implements Partial<DelegateHost> {
           "This is the same Nunu identity, with a separate task history. Private conversation and memory are not available here.",
           "Use SendMessage for team-visible progress; include cardAction for delivery or blockers. Plain text is private scratch space.",
           "Only use the capabilities explicitly provided in this run. Do not read private agent state.",
+          "Normal file tools are confined to this room workspace. Use external_operation with a concrete justification to request external paths. Tool networking is denied unless the user approves request_network for the exact hostname and port. Command approval cannot disable the sandbox.",
           await this.renderWorkPrompt(runContext)
         ].join("\n\n"),
         notices: []
@@ -1559,9 +1671,9 @@ export class HostRuntime implements Partial<DelegateHost> {
         now: new Date(),
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         // 第 8 步换成每 agent 的 AgentSettings.workspace.projectRoot。
-        projectRoot: record.settings.workspace?.projectRoot ?? null,
+        projectRoot: this.toolRoots(record, runContext).project,
         permission: describePermission(
-          record.settings.workspace?.toolPermission ?? this.settings.defaultToolPermission
+          record.settings.execution?.commands ?? record.settings.workspace?.toolPermission ?? this.settings.defaultToolPermission
         )
       },
       frozenProfile: cache.profile?.render,
@@ -1651,7 +1763,6 @@ export class HostRuntime implements Partial<DelegateHost> {
     return [
       "## Current Work",
       `Name: ${work.name}`,
-      `Goal: ${work.description || "(not specified)"}`,
       `Project root: ${work.projectRoot ?? "(not set)"}`,
       `Catalog revision: ${context.catalogRevision}`,
       "",
@@ -1734,6 +1845,78 @@ export class HostRuntime implements Partial<DelegateHost> {
     return record;
   }
 
+  private async waitForRecoveredExecution(context: ExecutionContext): Promise<void> {
+    if (!this.executor) return;
+    for (;;) {
+      const status = await this.executor.rpc<{ busy: boolean; executions: (ExecutionRecord & { id: string })[] }>("contextStatus", { contextId: context.id });
+      let refused = false;
+      for (const item of status.executions) {
+        if (item.result.state === "approval") {
+          await this.executor.rpc("decide", { id: item.id, allow: false });
+          refused = true;
+        }
+        if (item.result.state !== "finished") continue;
+        if (!item.origin) throw new Error("Execution has no original session metadata; result retained without acknowledgement");
+        const session = item.origin?.session;
+        if (session && session.agentId !== context.agentId) throw new Error("Recovery session does not belong to the authorized Nunu");
+        const event = await recoverExecutionResult(item, session
+          ? { read: () => this.sessions.read(session), append: draft => this.sessions.append(session, draft) }
+          : { read: () => this.store.readTranscript(context.agentId), append: draft => this.store.appendEvent(context.agentId, draft) });
+        if (event && !session) this.emit(HostEvents.agentMessageCompleted, { agentId: context.agentId, event });
+        await this.executor.rpc("acknowledge", { id: item.id });
+      }
+      if (refused) continue;
+      if (!status.busy || this.disposing) break;
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    // Only retire authority after every completed result is committed to its original transcript.
+    await this.executor.rpc("revoke", { contextId: context.id });
+  }
+
+  private async prepareExecution(id: string, runId: string, runContext: RunContext): Promise<(ExecutionEndpoint & { contextId: string }) | undefined> {
+    if (!this.executor) return;
+    const record = this.store.requireAgent(id);
+    const preferences = record.settings.execution!;
+    const workspace = runContext.kind === "work"
+      ? await this.workspaces.ensure(`room:${runContext.workId}`, this.workStore.getWork(runContext.workId).name, "room")
+      : await this.workspaces.ensure(`agent:${id}`, record.profile.name, "personal");
+    const permissionHistory = runContext.kind === "work" && runContext.session ? await this.sessions.read(runContext.session) : await this.store.readTranscript(id);
+    // A user explicitly dispatching/resuming a card starts a new approval opportunity;
+    // agent handoffs and automatic retries retain that user's task epoch.
+    const userCardDispatch = runContext.kind === "work" && runContext.taskId
+      ? (await this.workStore.readTimeline(runContext.workId)).findLast(event => event.actor.kind === "user" && "taskId" in event && event.taskId === runContext.taskId && ["task.delegated", "work.requested", "task.transitioned"].includes(event.type))?.id
+      : undefined;
+    const taskKey = runContext.kind === "work" ? `${runContext.workId}:${runContext.taskId ? `${runContext.taskId}:${userCardDispatch ?? "initial"}` : runContext.discussionId ?? runContext.triggerEventId}` : runContext.kind === "proactive" ? `proactive:${runContext.proposalId}` : `direct:${permissionHistory.findLast(event => event.type === "user")?.id ?? runId}`;
+    const refusedOperations: string[] = [];
+    for (const event of permissionHistory) {
+      if (event.type !== "tool" || event.permissionTaskKey !== taskKey || event.ok || !event.content.startsWith("User denied this operation.")) continue;
+      const assistant = permissionHistory.find(item => item.id === event.assistantId);
+      const call = assistant?.type === "assistant" ? assistant.parts.find(part => part.type === "tool_call" && part.id === event.toolCallId) : undefined;
+      if (call?.type === "tool_call") refusedOperations.push(permissionOperationKey(call.name, call.arguments));
+    }
+    const context: ExecutionContext = { id: `${id}:${workspace.id}`, agentId: id, workspaceId: workspace.id, root: workspace.root,
+      protectedPaths: [this.options.dataDir, ...(this.options.privateDir ? [this.options.privateDir] : [])],
+      policy: executionPolicy(preferences),
+      origin: { runId, taskKey, ...(runContext.kind === "work" ? { workId: runContext.workId, session: runContext.session,
+        membershipRevision: this.workStore.membership(runContext.workId, id).revision, catalogRevision: runContext.catalogRevision } : {}) },
+      tools: runContext.kind === "direct" ? this.toolCache.map(tool => tool.name) : runContext.kind === "work" ? [...new Set(["request_network", "external_operation", ...runContext.catalog.filter(entry => entry.kind === "local-tool" && entry.enabled).flatMap(entry => entry.kind === "local-tool" ? entry.toolNames : [])])] : [],
+      refusedOperations, externalGrants: preferences.externalGrants ?? [], commands: preferences.commands, approvedCommands: preferences.commandGrants.filter(grant => grant.workspaceId === workspace.id).map(grant => grant.command), network: preferences.networkGrants.filter(grant => grant.workspaceId === workspace.id).map(grant => grant.target), readOnly: [] };
+    // One binding per persistent context; prior turns no longer need a second authority entry.
+    for (const [previousRunId, previous] of this.executionContexts) {
+      if (previous.id === context.id) this.executionContexts.delete(previousRunId);
+    }
+    this.executionContexts.set(runId, context);
+    return this.executor.register(context);
+  }
+
+  private async revokeAgentExecution(id: string): Promise<void> {
+    for (const [contextId, context] of this.executionContexts) {
+      if (context.agentId !== id) continue;
+      await this.executor?.rpc("revoke", { contextId: context.id });
+      this.executionContexts.delete(contextId);
+    }
+  }
+
   private toolRoots(record: AgentRecord, context: RunContext = DIRECT_RUN_CONTEXT) {
     const dataParent = path.dirname(this.options.dataDir);
     return {
@@ -1750,11 +1933,7 @@ export class HostRuntime implements Partial<DelegateHost> {
         path.join(this.options.dataDir, "credentials.json"),
         path.join(this.options.dataDir, "secrets.json")
       ],
-      readOnly: context.kind === "work"
-        ? context.catalog
-            .filter((entry) => entry.kind === "knowledge" && entry.enabled)
-            .flatMap((entry) => entry.kind === "knowledge" ? entry.roots : [])
-        : []
+      readOnly: [] as string[]
     };
   }
 
@@ -1895,7 +2074,8 @@ export class HostRuntime implements Partial<DelegateHost> {
         target: String(params.target)
       });
       await this.recordToolCall(agentId, params);
-      this.emit(HostEvents.agentToolPending, { ...params, agentId, runId });
+      const context = this.scheduler.contextFor(runId);
+      this.emit(HostEvents.agentToolPending, { ...params, agentId, runId, ...(context?.kind === "work" ? { workId: context.workId } : {}) });
       return;
     }
     if (method === "turn.tool.started") {
@@ -1919,6 +2099,8 @@ export class HostRuntime implements Partial<DelegateHost> {
         assistantId,
         name: params.name,
         toolCallId: params.toolCallId,
+        executionId: `${runId}:${params.toolCallId}`,
+        permissionTaskKey: this.executionContexts.get(runId)?.origin?.taskKey,
         content: String(params.output ?? ""),
         ok: params.ok !== false,
         createdAt: Date.now()
@@ -1926,6 +2108,9 @@ export class HostRuntime implements Partial<DelegateHost> {
       this.forgetPending(agentId, String(params.toolCallId));
       if (!this.cardSessionFor(agentId)) this.emit(HostEvents.agentMessageCompleted, { agentId, event });
       this.emit(HostEvents.agentToolCompleted, { ...params, agentId, runId });
+      if (this.executor && this.executionContexts.has(runId)) {
+        await this.executor.rpc("acknowledge", { id: `${runId}:${params.toolCallId}` }).catch(() => undefined);
+      }
       return;
     }
     if (method === "turn.error") {
@@ -2326,6 +2511,8 @@ export class HostRuntime implements Partial<DelegateHost> {
       name: String(params.name),
       arguments: params.arguments ?? {}
     });
+    current.parts = current.parts.map(part => part.type === "tool_call" && part.id === toolCallId
+      ? { ...part, executionId: `${params.runId}:${toolCallId}` } : part);
     origins.set(toolCallId, current.messageId);
     this.callOrigins.set(agentId, origins);
     this.buffers.set(agentId, current);
@@ -2448,11 +2635,9 @@ function truncate(text: string, limit: number): string {
 
 /** 权限档位要进提示词，模型才知道自己会不会被审批卡拦。 */
 function describePermission(permission: ToolPermission): string {
-  if (permission === "always") {
-    return "always allow local tool actions inside the hard local-execution boundary; protected host state and destructive commands remain blocked.";
-  }
-  if (permission === "never") return "never allow local tool actions outside pre-approved project and scratch paths.";
-  return "ask before each new local action outside project and scratch; exact approvals can be remembered, and denials are not asked again.";
+  if (permission === "always") return "commands may execute inside the sandbox; file boundaries and network authorization still apply.";
+  if (permission === "never") return "commands are disabled. Workspace file tools remain available.";
+  return "ask before commands unless the exact command was remembered for this workspace. Tool networking requires separate approval.";
 }
 
 function sameApproval(left: ToolApproval, right: ToolApproval): boolean {

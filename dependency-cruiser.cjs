@@ -5,7 +5,7 @@ module.exports = {
       name: "kernel-must-not-depend-on-host-or-desktop",
       comment: "Engine cannot depend on product Host, desktop, or UI.",
       severity: "error",
-      from: { path: "^packages/kernel|^packages/sandbox|^packages/tools" },
+      from: { path: "^packages/kernel|^packages/sandbox|^packages/tools|^packages/executor" },
       to: { path: "^packages/host|^apps/desktop|^packages/ui" }
     },
     {
@@ -13,13 +13,25 @@ module.exports = {
       comment: "Host talks to Kernel only via RPC/protocol, never kernel internals.",
       severity: "error",
       from: { path: "^packages/host" },
-      to: { path: "^packages/kernel|^packages/sandbox|^packages/tools|^packages/ui|^apps/desktop" }
+      to: { path: "^packages/kernel|^packages/sandbox|^packages/tools|^packages/executor|^packages/ui|^apps/desktop" }
     },
     {
       name: "ui-must-not-depend-on-backend",
       severity: "error",
       from: { path: "^packages/ui" },
-      to: { path: "^packages/host|^packages/kernel|^packages/sandbox|^packages/tools|^apps/" }
+      to: { path: "^packages/host|^packages/kernel|^packages/sandbox|^packages/tools|^packages/executor|^apps/" }
+    },
+    {
+      name: "kernel-and-sandbox-must-not-import-executor",
+      severity: "error",
+      from: { path: "^packages/kernel|^packages/sandbox|^packages/tools" },
+      to: { path: "^packages/executor" }
+    },
+    {
+      name: "executor-must-not-import-kernel",
+      severity: "error",
+      from: { path: "^packages/executor" },
+      to: { path: "^packages/kernel" }
     }
   ],
   options: {

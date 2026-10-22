@@ -74,6 +74,10 @@ export async function disposePersistentShell(terminalsRoot: string): Promise<voi
   await shell?.dispose();
 }
 
+export async function hasRunningShellJobs(): Promise<boolean> {
+  return (await Promise.all([...sessions.values()].map(async entry => (await entry.catch(() => null))?.busy ?? false))).some(Boolean);
+}
+
 export async function disposeAllShells(): Promise<void> {
   const pending = [...sessions.values()];
   sessions.clear();
@@ -109,6 +113,7 @@ async function getShell(terminalsRoot: string, initialCwd: string): Promise<Pers
 class PersistentShell {
   readonly pid: number;
   alive = true;
+  get busy(): boolean { return this.active !== null; }
   private readonly stdin: Writable;
   private readonly control: Readable;
   private readonly jobs = new Map<string, ShellJob>();
@@ -139,9 +144,10 @@ class PersistentShell {
     const initialCwd = await existingDirectory(requestedCwd);
     const child = spawn("/bin/bash", ["--noprofile", "--norc"], {
       cwd: initialCwd,
-      detached: true,
+      detached: process.env.NUUM_ISOLATED_WORKER !== "1",
       env: {
         PATH: process.env.PATH,
+        ...Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(https?_proxy|all_proxy|no_proxy)$/i.test(key))),
         HOME: process.env.HOME,
         TMPDIR: process.env.TMPDIR,
         LANG: process.env.LANG,

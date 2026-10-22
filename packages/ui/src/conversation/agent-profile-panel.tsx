@@ -1,3 +1,5 @@
+import { ExecutionWidget } from "./execution-widget";
+import type { AgentSettings, ExecutionPreferences } from "@nuum/protocol";
 import { t } from "../i18n";
 import type { AgentProfile, AgentUpdateParams } from "@nuum/protocol";
 import { useEffect, useId, useRef, useState } from "react";
@@ -175,14 +177,16 @@ function IdentityDialog({ profile, onSave, onClose }: {
   </WorkDialog>;
 }
 
-export function AgentProfilePanel({ profile, onSave, onClose }: {
+export function AgentProfilePanel({ profile, onSave, onClose, settings, workspaceNames = {}, onSaveExecution, onOpenWorkspace }: {
   profile: AgentProfile; onSave(patch: AgentProfilePatch): Promise<void>; onClose(): void;
+  settings?: AgentSettings; workspaceNames?: Record<string, string>; onSaveExecution?(value: ExecutionPreferences): Promise<void>; onOpenWorkspace?(): void;
 }) {
   const [editing, setEditing] = useState(false);
   return <aside className="sand-agent-profile-panel" aria-label={t("Nunu identity")}>
     <header><span>{t("Nunu identity")}</span><SandIconButton icon="chevron-right" label={t("Close profile")} aria-label={t("Close profile")} onClick={onClose} size="sm" /></header>
     <div className="sand-agent-profile-panel__body">
       <NunuBadge profile={profile} onEdit={() => setEditing(true)} />
+      {settings && onSaveExecution && onOpenWorkspace ? <ExecutionWidget settings={settings} workspaceNames={workspaceNames} onSave={onSaveExecution} onOpen={onOpenWorkspace} /> : null}
     </div>
     {editing ? <IdentityDialog profile={profile} onSave={onSave} onClose={() => setEditing(false)} /> : null}
   </aside>;

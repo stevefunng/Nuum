@@ -10,6 +10,7 @@ export interface NuumBridge {
     openProactiveAgent(agentId: string): Promise<void>;
     showMain(): Promise<void>;
     quit(): Promise<void>;
+    openPath(file: string): Promise<string>;
     pickWorkspace(): Promise<string | null>;
     getSecrets(): Promise<SecretsState>;
     setSecrets(secrets: SecretsState): Promise<unknown>;

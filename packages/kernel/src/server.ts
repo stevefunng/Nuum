@@ -52,6 +52,7 @@ export function createKernelServer(registry = new ToolRegistry()): { peer: JsonR
       }
       case KernelMethods.turnStart: {
         const params = TurnStartParams.parse(raw);
+        if (!params.execution) throw new RpcError(KernelErrorCode.SANDBOX, "Host-authorized execution daemon context is required");
         if (runs.has(params.runId)) {
           throw new RpcError(KernelErrorCode.TURN_BUSY, `Run ${params.runId} is already running`);
         }

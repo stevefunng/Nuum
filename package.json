@@ -9,11 +9,11 @@
   "type": "module",
   "packageManager": "pnpm@10.33.0",
   "scripts": {
-    "dev": "turbo run build --filter=@nuum/host --filter=@nuum/kernel && pnpm --filter @nuum/desktop dev",
+    "dev": "turbo run build --filter=@nuum/host --filter=@nuum/kernel --filter=@nuum/executor && pnpm --filter @nuum/desktop dev",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "lint:deps": "depcruise apps packages --config dependency-cruiser.cjs",
-    "test": "turbo run test && turbo run build --filter=@nuum/host --filter=@nuum/kernel && node scripts/smoke-host.mjs"
+    "test": "turbo run build --filter=@nuum/executor && turbo run test && turbo run build --filter=@nuum/host --filter=@nuum/kernel --filter=@nuum/executor && node scripts/smoke-host.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
@@ -23,9 +23,12 @@
     "typescript": "^5.9.2"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12.0"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["electron", "esbuild"]
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
   }
 }

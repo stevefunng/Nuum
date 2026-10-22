@@ -85,9 +85,10 @@ const TOOL_GUIDANCE = [
   "",
   "- Prefer reading the real thing over recalling it. A file you have not",
   "  opened this turn is a guess.",
-  "- File and command actions outside your project and scratch follow the",
-  "  permission level named above. In ask mode, a new exact action raises an",
-  "  approval card and waits; remembered approval never covers a parent path.",
+  "- Tools run inside an OS sandbox. Normal tools stay inside your current workspace and do not need per-command approval. Use external_operation for authorized access outside it.",
+  "- Tool network access is denied by default. Use request_network with a concrete justification in the user’s language and an exact hostname:443 (or :80) to request user authorization. Model API access is separate.",
+  "- external_operation requires a concise justification explaining what you will do and why. Prefer read/import/export for files; shell must declare extra readPaths/writePaths. Host grants only the approved resources. Never treat a refusal as permanent across independent user tasks, and never retry it within the same task. Network permission is independent.",
+  "- Command approval does not change file or network permissions. Configuration is Host-owned and cannot be modified with tools.",
   "- The local execution root, protected host files, other agents' writable",
   "  state, and destructive-command guard are hard limits no approval bypasses.",
   "- A denial is an answer. Adapt: find a genuinely safer, lower-privilege way",
@@ -97,7 +98,7 @@ const TOOL_GUIDANCE = [
   "  credentials, or reaching for an unsanctioned API. A lower-signature",
   "  version of the same risky action is still that action. Do not resubmit",
   "  the same call hoping for a different result.",
-  "- shell is persistent for this agent: cd and exported variables survive",
+  "- shell is persistent within the current execution context: cd and exported variables survive",
   "  later calls. A slow command moves to the background instead of being",
   "  killed; inspect its returned shell_id and read the output file for full logs.",
   "- Give absolute paths unless a tool says otherwise. A relative path is",
@@ -293,7 +294,7 @@ function renderProfile(identity: AgentIdentity, paths: PromptPaths): string {
   lines.push(
     `Your profile is a JSON config file with "name", "tags" and "description" fields at ${paths.profile}`,
     `Your per-agent settings are at ${paths.settings}`,
-    "Both are readable with your file tools.",
+    "These Host-owned files are outside tool access. Your identity and memory are supplied in this prompt.",
     "",
     "Rewrite your own name, tags or description with update_state target=profile when",
     "the user asks you to become something else, or when what you actually do",
@@ -316,9 +317,7 @@ function renderEnvironment(environment: PromptEnvironment, paths: PromptPaths): 
     environment.projectRoot
       ? `Your project directory: ${environment.projectRoot}`
       : "You have no project directory. Ask the user where to work before touching files outside your own directories.",
-    `Your agent directory: ${paths.agentDir}`,
-    `Your scratch directory: ${paths.scratchDir}`,
-    "Use scratch for intermediate files, downloads, and notes.",
+    "Use your current workspace for working files. Private agent state is not tool-readable. Room tasks share only their room workspace.",
     "",
     `Tool permission: ${environment.permission}`
   ];

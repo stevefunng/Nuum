@@ -95,11 +95,6 @@ export const UpdateStateParams = z.discriminatedUnion("target", [
     action: z.enum(["write", "forget"]),
     fact: z.string(),
     tier: z.enum(["profile", "log", "note"]).default("log")
-  }),
-  z.object({
-    target: z.literal("settings"),
-    action: z.literal("set"),
-    project_root: z.string().nullable()
   })
 ]);
 export type UpdateStateParams = z.infer<typeof UpdateStateParams>;
@@ -250,17 +245,16 @@ export const DELEGATED_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: DelegatedToolNames.updateState,
     description:
-      "Change your own persistent state. target=profile rewrites your own name, tags or description; target=memory records or forgets a durable fact; target=settings sets or clears your project directory. Fields you do not pass are left alone.",
+      "Change your own persistent state. target=profile rewrites your own name, tags or description; target=memory records or forgets a durable fact. Fields you do not pass are left alone.",
     inputSchema: {
       type: "object",
       required: ["target", "action"],
       properties: {
-        target: { type: "string", enum: ["profile", "memory", "settings"] },
+        target: { type: "string", enum: ["profile", "memory"] },
         action: { type: "string", enum: ["set", "write", "forget"] },
         name: { type: "string", description: "For target=profile." },
         description: { type: "string", description: "For target=profile." },
         tags: { type: "array", items: { type: "string" }, description: "For target=profile: replaces all tags; pass [] to clear." },
-        project_root: { type: ["string", "null"], description: "For target=settings: absolute project directory, or null to clear it." },
         fact: { type: "string", description: "For target=memory: one self-contained fact." },
         tier: {
           type: "string",

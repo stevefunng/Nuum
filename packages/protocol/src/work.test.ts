@@ -84,3 +84,10 @@ test("work events carry their own ordered-domain identity", () => {
   assert.equal(event.seq, 4);
   assert.equal(event.type, "chat.posted");
 });
+
+test("NunuBar creation and update reject removed goal and user-controlled work roots", async () => {
+  const { WorkCreateParams, WorkUpdateParams } = await import("./host-contract.js");
+  assert.deepEqual(WorkCreateParams.parse({ name: "Team" }), { name: "Team" });
+  assert.throws(() => WorkCreateParams.parse({ name: "Team", description: "old goal" }));
+  assert.throws(() => WorkUpdateParams.parse({ id: "r", projectRoot: "/" }));
+});

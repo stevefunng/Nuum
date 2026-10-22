@@ -80,10 +80,8 @@ export const HostEvents = {
 
 export const WorkCreateParams = z.object({
   kind: z.enum(["room", "work"]).optional(),
-  name: z.string().min(1),
-  description: z.string().default(""),
-  projectRoot: z.string().nullable().default(null)
-});
+  name: z.string().min(1)
+}).strict();
 export type WorkCreateParams = z.infer<typeof WorkCreateParams>;
 
 export const WorkIdParams = z.object({ id: z.string().min(1) });
@@ -91,10 +89,8 @@ export type WorkIdParams = z.infer<typeof WorkIdParams>;
 
 export const WorkUpdateParams = WorkIdParams.extend({
   kind: z.literal("work").optional(),
-  name: z.string().min(1).optional(),
-  description: z.string().optional(),
-  projectRoot: z.string().nullable().optional()
-});
+  name: z.string().min(1).optional()
+}).strict();
 export type WorkUpdateParams = z.infer<typeof WorkUpdateParams>;
 
 export const WorkPostMessageParams = z.object({
@@ -282,6 +278,7 @@ export const AgentUpdateParams = z.object({
   avatarMaterial: z.string().optional(),
   model: ModelRef.optional(),
   workspace: AgentSettings.shape.workspace.optional(),
+  execution: AgentSettings.shape.execution.optional(),
   hiddenFromSidebar: z.boolean().optional()
 });
 export type AgentUpdateParams = z.infer<typeof AgentUpdateParams>;
@@ -356,8 +353,11 @@ export const AgentToolPendingEvent = z.object({
   toolCallId: z.string(),
   name: z.string(),
   arguments: z.record(z.unknown()),
-  action: z.enum(["read-file", "list-directory", "write-file", "run-command"]),
-  target: z.string()
+  action: z.enum(["read-file", "list-directory", "write-file", "run-command", "network"]),
+  target: z.string(),
+  justification: z.string().optional(),
+  allowAlways: z.boolean().optional(),
+  details: z.string().optional()
 });
 export type AgentToolPendingEvent = z.infer<typeof AgentToolPendingEvent>;
 

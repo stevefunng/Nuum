@@ -7,6 +7,7 @@ export const AssistantPart = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("tool_call"),
     id: z.string(),
+    executionId: z.string().optional(),
     name: z.string(),
     arguments: z.record(z.unknown())
   })
@@ -158,6 +159,8 @@ export const TranscriptEvent = z.discriminatedUnion("type", [
     /** 产生这次调用的 assistant 事件。旧转录没有该字段，投影时回退到 toolCallId。 */
     assistantId: z.string().optional(),
     toolCallId: z.string(),
+    executionId: z.string().optional(),
+    permissionTaskKey: z.string().optional(),
     name: z.string(),
     content: z.string(),
     ok: z.boolean().optional(),

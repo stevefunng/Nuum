@@ -11,3 +11,7 @@ export * from "./work.js";
 export * from "./proactive.js";
 
 export * from "./context-budget.js";
+
+export * from "./execution.js";
+
+export * from "./permission-rules.js";

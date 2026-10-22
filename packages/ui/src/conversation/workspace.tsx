@@ -1,3 +1,4 @@
+import { ExecutionApproval } from "./execution-approval";
 import { t } from "../i18n";
 import type { AgentView, ViewBlock } from "@nuum/protocol";
 import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
@@ -13,8 +14,9 @@ export interface PendingTool {
   toolCallId: string;
   name: string;
   arguments: Record<string, unknown>;
-  action: "read-file" | "list-directory" | "write-file" | "run-command";
+  action: "read-file" | "list-directory" | "write-file" | "run-command" | "network";
   target: string;
+  justification?: string; allowAlways?: boolean; details?: string;
 }
 
 export interface ConversationWorkspaceProps {
@@ -39,7 +41,7 @@ export interface ConversationWorkspaceProps {
     avatarShape: string;
     avatarMaterial: string;
   }): void;
-  onApprove(resolution: "always" | "once" | "deny" | "never"): void;
+  onApprove(resolution: "always" | "once" | "deny" | "never"): void | Promise<void>;
   /** 回答提问卡片：选项值原样成为一条用户消息并唤醒对方。 */
   onAnswerWidget?(messageId: string, value: string): void;
   onOpenProfile?(): void;
@@ -49,6 +51,8 @@ export interface ConversationWorkspaceProps {
 function toolLabel(name: string): string {
   const normalized = name.toLowerCase();
   if (normalized === "bash" || normalized === "shell") return t("Bash");
+  if (normalized === "external_operation") return t("Local operation");
+  if (normalized === "request_network") return t("Network access");
   if (normalized === "read") return t("Read");
   if (normalized === "ls") return t("List");
   if (normalized === "write") return t("Write");
@@ -558,20 +562,7 @@ export function ConversationWorkspace({
             <span className="sand-chat-working__label">{activityLabel}</span>
           </div>
         ) : null}
-        {pendingTool ? (
-          <div className="sand-permission-dock">
-            <div>
-              <strong>{t("Allow {action}?", { action: t(pendingTool.action) })}</strong>
-              <div className="sand-permission-dock__preview">{pendingTool.target}</div>
-            </div>
-            <div className="sand-permission-dock__actions">
-              <button className="sand-permission-dock__btn sand-permission-dock__btn--deny" onClick={() => onApprove("deny")} type="button">{t("Deny")}</button>
-              <button className="sand-permission-dock__btn sand-permission-dock__btn--deny" onClick={() => onApprove("never")} type="button">{t("Never")}</button>
-              <button className="sand-permission-dock__btn sand-permission-dock__btn--once" onClick={() => onApprove("once")} type="button">{t("Only this time")}</button>
-              <button className="sand-permission-dock__btn sand-permission-dock__btn--always" onClick={() => onApprove("always")} type="button">{t("Always this action")}</button>
-            </div>
-          </div>
-        ) : null}
+        {pendingTool ? <ExecutionApproval action={pendingTool.action} justification={pendingTool.justification} allowAlways={pendingTool.allowAlways} details={pendingTool.details} target={pendingTool.target} onDecide={async resolution => { await onApprove(resolution); }} /> : null}
         {notice ? <div className="sand-prompt-attachment-notice">{t(notice)}</div> : null}
         <form
           className="sand-prompt-form"

@@ -38,7 +38,6 @@ test("the machine's real absolute paths reach the prompt", () => {
   for (const expected of [
     "/Users/me/.nuum/agents/a1/profile.json",
     "/Users/me/.nuum/agents/a1/settings.json",
-    "/Users/me/.nuum/agents/a1/scratch",
     "/Users/me/dev/thing"
   ]) {
     assert.ok(render.text.includes(expected), `prompt must name ${expected}`);

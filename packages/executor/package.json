@@ -1,0 +1,19 @@
+{
+  "name": "@nuum/executor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && esbuild src/worker.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/worker-bundle.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test 'src/**/*.test.ts'"
+  },
+  "dependencies": {
+    "@nuum/protocol": "workspace:*",
+    "@nuum/sandbox": "workspace:*",
+    "@nuum/tools": "workspace:*"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
+}

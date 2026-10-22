@@ -427,11 +427,11 @@ test("deny is remembered for anti-nag, while never lowers only this agent's perm
   );
   await harness.runtime.decide(alpha, "call-never", "never");
   assert.deepEqual((await harness.runtime.getAgent(alpha)).view.settings.workspace, {
-    projectRoot: null,
+    projectRoot: (await harness.runtime.getAgent(alpha)).view.settings.workspace!.projectRoot,
     toolPermission: "never"
   });
   assert.deepEqual((await harness.runtime.getAgent(beta)).view.settings.workspace, {
-    projectRoot: null,
+    projectRoot: (await harness.runtime.getAgent(beta)).view.settings.workspace!.projectRoot,
     toolPermission: null
   });
   assert.deepEqual((await harness.runtime.store.readApprovals(alpha)).refused, [
@@ -449,11 +449,12 @@ test("turn roots and project settings belong to the individual agent", async (t)
   })).profile.id;
   await harness.send(id, "go");
   const started = harness.kernel.started[0]!;
-  assert.equal(started.roots.project, project);
+  assert.notEqual(started.roots.project, project);
+  assert.equal(started.roots.project, (await harness.runtime.getAgent(id)).view.settings.workspace!.projectRoot);
   assert.equal(started.roots.scratch, path.join(harness.dataDir, "agents", id, "scratch"));
   assert.equal(started.roots.terminals, path.join(harness.dataDir, "agents", id, "terminals"));
   assert.equal(started.roots.denied.some((item) => item.endsWith("secrets.bin")), true);
-  assert.equal(started.toolPermission, "always");
+  assert.equal(started.toolPermission, "ask");
 });
 
 test("deleting an idle agent disposes its persistent shell before removing the directory", async (t) => {
@@ -521,7 +522,7 @@ test("the first turn freezes the derived name, not the placeholder", async (t) =
   assert.equal(sent.role, "system");
   assert.ok(sent.content.includes("Title: trace the flaky login test"));
   // 冻结发生在改名之后，所以第一轮就不该有飘移说明。
-  assert.equal(sent.content.includes("Assistant"), false);
+  assert.equal(sent.content.includes("Title: Assistant"), false);
   assert.ok(harness.kernel.started[0]!.messages.at(-1)!.content.startsWith("trace the flaky login test"));
   void run;
 });
@@ -806,19 +807,14 @@ test("writing the same memory twice does not burn another epoch", async (t) => {
   assert.equal((await harness.runtime.store.readPromptCache(id)).epoch, first);
 });
 
-test("update_state can set and clear only its own project directory", async (t) => {
+test("model cannot change execution settings and personal workspaces are distinct", async (t) => {
   const harness = await openHarness(t);
-  const alpha = (await harness.runtime.createAgent({ name: "Alpha" })).profile.id;
-  const beta = (await harness.runtime.createAgent({ name: "Beta" })).profile.id;
-  const project = path.join(harness.dataDir, "alpha-project");
-  assert.equal(
-    await harness.runtime.updateState(alpha, { target: "settings", action: "set", project_root: project }),
-    `Project directory set to ${project}.`
-  );
-  assert.equal((await harness.runtime.getAgent(alpha)).view.settings.workspace?.projectRoot, project);
-  assert.equal((await harness.runtime.getAgent(beta)).view.settings.workspace?.projectRoot, null);
-  await harness.runtime.updateState(alpha, { target: "settings", action: "set", project_root: null });
-  assert.equal((await harness.runtime.getAgent(alpha)).view.settings.workspace?.projectRoot, null);
+  const alpha = await harness.runtime.createAgent({ name: "Alpha" });
+  const beta = await harness.runtime.createAgent({ name: "Beta" });
+  assert.ok(alpha.settings.workspace?.projectRoot);
+  assert.notEqual(alpha.settings.workspace?.projectRoot, beta.settings.workspace?.projectRoot);
+  // Runtime rejects stale tool payloads as well as the schema rejecting new calls.
+  await assert.rejects(harness.runtime.updateState(alpha.profile.id, { target: "settings", action: "set", project_root: "/" } as never), /only.*user/);
 });
 
 test("an agent renaming itself announces it and keeps the frozen prefix", async (t) => {

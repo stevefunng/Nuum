@@ -1,3 +1,5 @@
+import { externalTool } from "./external-tool.js";
+import { networkTool } from "./network-tool.js";
 import type { Tool } from "./types.js";
 import {
   deleteTool,
@@ -19,7 +21,9 @@ export const builtinTools: Tool[] = [
   lsTool,
   globTool,
   grepTool,
-  shellTool
+  shellTool,
+  networkTool,
+  externalTool
 ];
 
 export {

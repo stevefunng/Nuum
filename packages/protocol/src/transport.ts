@@ -151,3 +151,5 @@ export function createStdioDuplex(
     }
   };
 }
+
+export { executionRpc } from "./execution-client.js";

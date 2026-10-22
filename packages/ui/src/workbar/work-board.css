@@ -279,3 +279,6 @@ body[data-agent-dragging="member"] .sand-work-member-drop-hint { display: flex; 
 .sand-work-notice summary { cursor: pointer; color: var(--nuum-text-tertiary); }
 .sand-work-notice label { display: inline-flex; align-items: center; gap: 8px; margin: 8px 8px 0 0; }
 .sand-work-notice input { width: 64px; padding: 4px 8px; color: var(--nuum-text-primary); background: var(--work-control); border: 1px solid var(--work-edge); border-radius: 4px; }
+
+.sand-work-approvals { display: grid; gap: 8px; padding: 8px 16px; max-height: 220px; overflow: auto; }
+.sand-work-approvals .sand-permission-dock { position: static; margin: 0; }

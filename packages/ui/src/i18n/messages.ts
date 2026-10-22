@@ -1,4 +1,32 @@
 export const messages: Record<string, Record<"zh-CN" | "en", string>> = {
+  "Remembered commands ({count})": {"zh-CN": "已记住的命令（{count}）", "en": "Remembered commands ({count})"},
+  "Network access requires your approval.": {"zh-CN": "需要联网时会请求你的允许。", "en": "Network access requires your approval."},
+  "Denied by default": {"zh-CN": "默认禁止", "en": "Denied by default"},
+  "Tool network": {"zh-CN": "工具网络", "en": "Tool network"},
+  "Revoke": {"zh-CN": "撤销", "en": "Revoke"},
+  "Former room": {"zh-CN": "已离开的房间", "en": "Former room"},
+  "Allow inside sandbox": {"zh-CN": "沙箱内允许", "en": "Allow inside sandbox"},
+  "Ask each time": {"zh-CN": "每次询问", "en": "Ask each time"},
+  "Command execution": {"zh-CN": "命令执行", "en": "Command execution"},
+  "Room tasks use the shared room workspace.": {"zh-CN": "房间任务使用对应房间的共享目录。", "en": "Room tasks use the shared room workspace."},
+  "Open folder": {"zh-CN": "打开文件夹", "en": "Open folder"},
+  "Personal workspace": {"zh-CN": "个人工作区", "en": "Personal workspace"},
+  "Workspace and permissions": {"zh-CN": "工作区与权限", "en": "Workspace and permissions"},
+  "network": { "zh-CN": "工具联网", "en": "tool network access" },
+  "Permission applies only to this Nunu and workspace.": { "zh-CN": "授权仅适用于这个 Nunu 和当前工作区。", "en": "Permission applies only to this Nunu and workspace." },
+  "Dynamic commands require one-time approval": { "zh-CN": "此动态命令需要单次确认", "en": "Dynamic commands require one-time approval" },
+  "Read file": { "zh-CN": "读取文件", "en": "Read file" },
+  "Import file": { "zh-CN": "导入文件", "en": "Import file" },
+  "Export file": { "zh-CN": "导出文件", "en": "Export file" },
+  "Run command": { "zh-CN": "执行命令", "en": "Run command" },
+  "Compound command": { "zh-CN": "组合命令", "en": "Compound command" },
+  "Local operation": { "zh-CN": "本机操作", "en": "Local operation" },
+  "Network access": { "zh-CN": "网络访问", "en": "Network access" },
+  "Always allow": { "zh-CN": "始终允许", "en": "Always allow" },
+  "Execution details": { "zh-CN": "执行详情", "en": "Execution details" },
+  "Allow once": { "zh-CN": "单次允许", "en": "Allow once" },
+  "Local computer permissions": { "zh-CN": "本机访问授权", "en": "Local computer permissions" },
+  "Remember for this workspace": { "zh-CN": "在此工作区记住", "en": "Remember for this workspace" },
   "Greet {name}": { "zh-CN": "和 {name} 打招呼", "en": "Greet {name}" },
   "Waiting for approval": { "zh-CN": "等待确认", "en": "Waiting for approval" },
 
@@ -1196,9 +1224,9 @@ export const messages: Record<string, Record<"zh-CN" | "en", string>> = {
     "zh-CN": "外观",
     "en": "Appearance"
   },
-  "Workspace and permissions": {
-    "zh-CN": "工作目录与权限",
-    "en": "Workspace and permissions"
+  "Local tool permissions": {
+    "zh-CN": "本地工具权限",
+    "en": "Local tool permissions"
   },
   "Model preferences": {
     "zh-CN": "模型偏好",

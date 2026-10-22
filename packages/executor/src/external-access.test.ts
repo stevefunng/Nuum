@@ -1,0 +1,81 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from "node:fs/promises";
+import path from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
+import { executionRpc } from "@nuum/protocol/node";
+import { type ExecutionContext, type ExecutionResult } from "@nuum/protocol";
+import { startExecutor } from "./server.js";
+
+test("external operations: once, scoped remember, refusal, isolation and stale approvals", { timeout: 120000 }, async () => {
+  const dir = await mkdtemp(path.join(process.cwd(), ".permission-qa-"));
+  const root = path.join(dir, "workspace"), outside = path.join(dir, "external"), state = path.join(dir, "private", "executor");
+  await Promise.all([root, outside, state].map(p => mkdir(p, { recursive: true })));
+  const socket = path.join(tmpdir(), `nuum-${randomUUID()}.sock`);
+  const daemon = await startExecutor(state, socket, "owner");
+  const owner = { socket, instance: daemon.instance, token: "owner" };
+  const context: ExecutionContext = { id: "one", agentId: "a", workspaceId: "workspace", root, commands: "ask", approvedCommands: [], network: [], tools: ["shell", "external_operation"], readOnly: [], origin: { runId: "run", taskKey: "task-a" } };
+  const rpc = <T = ExecutionResult>(method: string, params: unknown) => executionRpc<T>(owner, method, params);
+  const submit = (id: string, name: string, input: Record<string, unknown>) => rpc("submit", { id: `run:${id}`, contextId: "one", name, input });
+  const finish = async (id: string) => {
+    for (let i = 0; i < 400; i++) {
+      const result = await rpc("status", { id: `run:${id}` });
+      if (result.state === "finished") return result;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    throw new Error("Timed out");
+  };
+  try {
+    await rpc("register", context);
+    await writeFile(path.join(root, "report.txt"), "hello");
+    const input = { operation: "export", source: path.join(root, "report.txt"), destination: path.join(outside, "report.txt"), justification: "Export the report" };
+    assert.equal((await submit("first", "external_operation", input)).state, "approval");
+    await rpc("decide", { id: "run:first", allow: true });
+    assert.equal((await finish("first")).ok, true);
+    assert.equal(await readFile(input.destination, "utf8"), "hello");
+    assert.equal((await submit("second", "external_operation", input)).state, "approval", "once must not persist");
+    await rpc("decide", { id: "run:second", allow: false });
+    const denied = await submit("third", "external_operation", { ...input, justification: "Different prose" });
+    assert.equal(denied.state, "finished");
+    await rpc("register", { ...context, origin: { runId: "run", taskKey: "task-b" } });
+    const next = await submit("fourth", "external_operation", input);
+    assert.equal(next.state, "approval", "another task can ask");
+    await rpc("decide", { id: "run:fourth", allow: true, remember: true });
+    assert.equal((await finish("fourth")).ok, false, "export must not overwrite by default");
+    await rm(input.destination);
+    assert.equal((await submit("fifth", "external_operation", input)).state, "running");
+    assert.equal((await finish("fifth")).ok, true);
+    assert.equal((await submit("different", "external_operation", { ...input, destination: path.join(outside, "other.txt") })).state, "approval");
+    const directoryRequest = { ...input, resourceRoot: outside, destination: path.join(outside, "new-a.txt") };
+    assert.equal((await submit("dir", "external_operation", directoryRequest)).state, "approval");
+    await rpc("decide", { id: "run:dir", allow: true, remember: true });
+    assert.equal((await finish("dir")).ok, true);
+    assert.equal((await submit("dir-b", "external_operation", { ...input, destination: path.join(outside, "new-b.txt") })).state, "running");
+    assert.equal((await finish("dir-b")).ok, true);
+    await assert.rejects(submit("dir-overwrite", "external_operation", { ...directoryRequest, overwrite: true }), /only creates new/);
+    const script = path.join(root, "script.sh");
+    await writeFile(script, "printf first");
+    const shell = { operation: "shell", command: `/bin/bash '${script}'`, justification: "Run my script" };
+    assert.equal((await submit("script", "external_operation", shell)).state, "approval");
+    await rpc("decide", { id: "run:script", allow: true, remember: true });
+    assert.equal((await finish("script")).output, "first");
+    await writeFile(script, "printf changed");
+    assert.equal((await submit("script-changed", "external_operation", shell)).state, "approval");
+    const dynamic = await submit("dynamic", "external_operation", { ...shell, command: "echo $(date)" });
+    assert.equal(dynamic.state === "approval" && dynamic.allowAlways, false);
+    await assert.rejects(rpc("decide", { id: "run:dynamic", allow: true, remember: true }), /only be allowed once/);
+    const ordinary = await submit("workspace", "shell", { command: "printf ok > safe.txt", block_until_ms: 10000 });
+    assert.equal(ordinary.state, "running", "sandbox commands do not prompt");
+    assert.equal((await finish("workspace")).ok, true);
+    await submit("escape", "shell", { command: `cat '${input.destination}'`, block_until_ms: 10000 });
+    assert.match((await finish("escape")).output, /not permitted|denied/i);
+    await assert.rejects(submit("private", "external_operation", { operation: "read", source: path.join(dir, "private"), justification: "Read settings" }), /private configuration/);
+    await rpc("register", { ...context, origin: { runId: "run", taskKey: "task-c" } });
+    const target = path.join(outside, "changed.txt");
+    await submit("changed", "external_operation", { ...input, destination: target });
+    await symlink(path.join(dir, "private", "leak.txt"), target);
+    await rpc("decide", { id: "run:changed", allow: true });
+    assert.equal((await finish("changed")).ok, false, "changed symlink must not inherit approval");
+  } finally { await daemon.close(); await rm(dir, { recursive: true, force: true }); }
+});

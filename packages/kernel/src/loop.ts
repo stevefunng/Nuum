@@ -1,3 +1,5 @@
+import { executionRpc } from "@nuum/protocol/node";
+import { ExecutionResult } from "@nuum/protocol";
 import path from "node:path";
 import {
   KernelErrorCode,
@@ -111,7 +113,7 @@ export function startTurn(
 
   async function run(): Promise<void> {
     const { port, apiKey } = deps.selectModel(params.model, params.secrets);
-    const sandbox = createSandbox({
+    const sandbox = params.execution ? null : createSandbox({
       roots: params.roots,
       permission: params.toolPermission,
       approvals: params.approvals,
@@ -256,7 +258,7 @@ export function startTurn(
 
   async function resolveToolCall(
     call: ToolCall,
-    sandbox: ReturnType<typeof createSandbox>
+    sandbox: ReturnType<typeof createSandbox> | null
   ): Promise<{ ok: boolean; output: string; images?: ModelImage[]; endTurn?: boolean }> {
     if (delegated.has(call.name)) {
       emit("turn.tool.delegate", {
@@ -267,6 +269,8 @@ export function startTurn(
       });
       return waitFor(delegations, call.id);
     }
+    if (params.execution) return resolveRemoteTool(call);
+    if (!sandbox) throw new Error("Missing execution backend");
     const tool = registry.get(call.name);
     if (!tool) throw new RpcError(KernelErrorCode.TOOL, `Unknown tool: ${call.name}`);
     const declaredAction = tool.definition.action;
@@ -320,6 +324,38 @@ export function startTurn(
       if (abort.signal.aborted) throw new TurnCancelled();
       return { ok: false, output: error instanceof Error ? error.message : String(error) };
     }
+  }
+
+  async function resolveRemoteTool(call: ToolCall): Promise<{ ok: boolean; output: string; images?: ModelImage[] }> {
+    const endpoint = params.execution!;
+    const id = `${params.runId}:${call.id}`;
+    if (!params.localToolNames.includes(call.name)) return { ok: false, output: "Tool is not enabled for this run" };
+    const status = async (): Promise<ExecutionResult> => {
+      let last: unknown;
+      for (const delay of [0, 200, 800]) {
+        if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+        try { return ExecutionResult.parse(await executionRpc(endpoint, "status", { id })); } catch (error) { last = error; }
+      }
+      throw last;
+    };
+    let state: ExecutionResult;
+    try { state = ExecutionResult.parse(await executionRpc(endpoint, "submit", { id, contextId: endpoint.contextId, name: call.name, input: call.arguments })); }
+    catch { state = await status(); }
+    if (state.state === "approval") {
+      emit("turn.tool.pending", { runId: params.runId, toolCallId: call.id, name: call.name, arguments: call.arguments,
+        mutating: state.action !== "read-file", action: state.action, target: state.target, justification: state.justification, allowAlways: state.allowAlways, details: state.details });
+      await waitFor(decisions, call.id);
+      // Host has already applied the decision through its privileged daemon connection.
+      state = await status();
+    }
+    emit("turn.tool.started", { runId: params.runId, toolCallId: call.id, name: call.name, arguments: call.arguments });
+    while (state.state === "running") {
+      if (abort.signal.aborted) { await executionRpc(endpoint, "cancel", { id }); throw new TurnCancelled(); }
+      await new Promise(resolve => setTimeout(resolve, 100));
+      state = await status();
+    }
+    if (state.state !== "finished") return { ok: false, output: "Execution is still awaiting Host authorization" };
+    return { ok: state.ok, output: state.output, ...(state.images ? { images: state.images } : {}) };
   }
 
   /** 审批与委派是同一种等待：挂一个 resolver，abort 时按取消收束。 */

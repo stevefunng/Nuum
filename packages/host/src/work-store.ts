@@ -149,7 +149,7 @@ export class WorkStore {
     return this.requireWork(id).profile;
   }
 
-  async updateWork(id: string, patch: Partial<Pick<WorkProfile, "name" | "description" | "projectRoot" | "kind">>): Promise<WorkProfile> {
+  async updateWork(id: string, patch: Partial<Pick<WorkProfile, "name" | "description" | "projectRoot" | "workspaceId" | "kind">>): Promise<WorkProfile> {
     return this.chain(id, async () => {
     const current = this.requireWork(id);
     const profile = WorkProfile.parse({ ...current.profile, ...patch, id: current.profile.id });

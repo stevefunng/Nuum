@@ -1,3 +1,5 @@
+import { ExecutionApproval } from "../conversation/execution-approval";
+import type { LocalToolAction, ToolResolution } from "@nuum/protocol";
 import { t } from "../i18n";
 import type {
   AgentView,
@@ -25,11 +27,10 @@ export function WorkCreation({
 }: {
   canCancel: boolean;
   onCancel(): void;
-  onCreate(input: { name: string; description: string; kind: "room" | "work" }): void;
+  onCreate(input: { name: string; kind: "room" | "work" }): void;
 }) {
   const [kind, setKind] = useState<"room" | "work">("work");
   const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
   return (
     <section className="sand-work-create">
       <div className="sand-work-create__card">
@@ -44,13 +45,9 @@ export function WorkCreation({
           <span>{t("Name")}</span>
           <input autoFocus onChange={(event) => setName(event.target.value)} placeholder={t("e.g. Product launch")} value={name} />
         </label>
-        <label>
-          <span>{t("Goal")}</span>
-          <AutoTextarea onChange={(event) => setDescription(event.target.value)} placeholder={t("What should this Work accomplish?")} value={description} />
-        </label>
         <div className="sand-work-create__actions">
           {canCancel ? <button onClick={onCancel} type="button">{t("Cancel")}</button> : null}
-          <button disabled={!name.trim()} onClick={() => onCreate({ name: name.trim(), description: description.trim(), kind })} type="button">{t("Create Work")}</button>
+          <button disabled={!name.trim()} onClick={() => onCreate({ name: name.trim(), kind })} type="button">{t("Create Work")}</button>
         </div>
       </div>
     </section>
@@ -58,12 +55,14 @@ export function WorkCreation({
 }
 
 export interface WorkBoardProps {
+  approvals?: { agentId: string; agentName: string; toolCallId: string; action: LocalToolAction; justification?: string; allowAlways?: boolean; details?: string; target: string }[];
+  onApproveTool?(agentId: string, resolution: ToolResolution): Promise<void>;
   snapshot: WorkSnapshot;
   agents: readonly AgentView[];
   onPostMessage(body: string): void;
   onContinue(eventId: string, inputAfterSeq?: number): void;
   onStopDiscussion(): void;
-  onUpdateWork(patch: { description: string; projectRoot: string | null; kind?: "work" }): void;
+  onUpdateWork(patch: { kind: "work" }): void;
   onCreateTask(input: { title: string; assigneeIds: string[] }): void;
   onTransitionTask(taskId: string, to: WorkTaskState, expectedRevision: number, blockerReason?: string): void;
   onReadTaskTrace?(taskId: string, sessionId?: string, beforeSeq?: number): Promise<{ sessions: { id: string; agentId: string }[]; sessionId?: string; entries: TranscriptEvent[]; beforeSeq?: number }>;
@@ -76,6 +75,7 @@ export interface WorkBoardProps {
 }
 
 export function WorkBoard({
+  approvals = [], onApproveTool,
   snapshot,
   agents,
   onPostMessage,
@@ -116,19 +116,14 @@ export function WorkBoard({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [page, setPage] = useState<"tasks" | "deliverables">("tasks");
   const [dispatchInstruction, setDispatchInstruction] = useState("");
-  const [dialog, setDialog] = useState<"capabilities" | "setup" | null>(null);
-  const [workGoal, setWorkGoal] = useState(snapshot.profile.description);
-  const [projectRoot, setProjectRoot] = useState(snapshot.profile.projectRoot ?? "");
+  const [dialog, setDialog] = useState<"capabilities" | null>(null);
   const selectedTask = snapshot.tasks.find((task) => task.id === selectedTaskId) ?? null;
   const memberDrag = useAgentDrag(({ agentId, workId }) => {
     if (workId) { if (workId !== snapshot.profile.id) onMoveAgentToWork(agentId, workId); return; }
     const member = snapshot.members.find((agent) => agent.profile.id === agentId);
     if (member) onDetachAgent(agentId, member.settings.workMembership?.revision ?? 0);
   });
-  useEffect(() => {
-    setWorkGoal(snapshot.profile.description);
-    setProjectRoot(snapshot.profile.projectRoot ?? "");
-  }, [snapshot.profile.id, snapshot.profile.description, snapshot.profile.projectRoot]);
+
 
   return (
     <section className="sand-work-board">
@@ -137,17 +132,16 @@ export function WorkBoard({
           <h1>{workDisplayTitle(snapshot.profile.name)}</h1>
         </div>
         <div className="sand-work-board__summary">
-{snapshot.discussionRunning ? <button type="button" onClick={onStopDiscussion}>{t("Stop discussion")}</button> : null}
-          <span><i />{snapshot.tasks.filter((task) => task.state === "in_progress").length}{" "}{t("active")}</span>
+          {snapshot.discussionRunning ? <button type="button" onClick={onStopDiscussion}>{t("Stop discussion")}</button> : null}
           {snapshot.tasks.some((task) => task.state === "blocked") ? <span>{snapshot.tasks.filter((task) => task.state === "blocked").length} {t("Blocked")}</span> : null}
-          <button className="sand-work-icon-button" aria-label={t("Work settings")} onClick={() => setDialog("setup")} type="button"><SandIcon name="sliders" /></button>
         </div>
       </header>
+      {onApproveTool && approvals.length ? <div className="sand-work-approvals">{approvals.map(approval => <ExecutionApproval key={`${approval.agentId}:${approval.toolCallId}`} action={approval.action} justification={approval.justification} allowAlways={approval.allowAlways} details={approval.details} target={approval.target} agentName={approval.agentName} onDecide={resolution => onApproveTool(approval.agentId, resolution)} />)}</div> : null}
       <div className="sand-work-board__main" ref={mainRef} style={{ "--work-inspector-width": `${inspector.width}px`, "--work-capability-height": `${inspector.capabilityHeight}px` } as CSSProperties}>
         <div className="sand-work-board__center">
           {snapshot.profile.kind === "room" ? <div className="sand-work-page-heading">
             <strong>{t("Local room")}</strong>
-            <button type="button" onClick={() => onUpdateWork({ description: snapshot.profile.description, projectRoot: snapshot.profile.projectRoot, kind: "work" })}>{t("Enable task board")}</button>
+            <button type="button" onClick={() => onUpdateWork({ kind: "work" })}>{t("Enable task board")}</button>
           </div> : <>
           <div className="sand-work-page-heading">
             <button className="sand-work-page-switch" type="button" title={page === "tasks" ? t("切换到产物") : t("切换到 Tasks")} aria-label={page === "tasks" ? t("切换到产物") : t("切换到 Tasks")}
@@ -293,13 +287,7 @@ export function WorkBoard({
         </div>
       </WorkDialog> : null}
       {dialog === "capabilities" ? <WorkCapabilityDialog onClose={() => setDialog(null)} onAdd={onAddCatalogEntry} onPickDirectory={onPickDirectory} /> : null}
-      {dialog === "setup" ? <WorkDialog title={t("Work settings")} subtitle={t("A shared goal and a place to work.")} onClose={() => setDialog(null)}>
-        <form className="sand-work-dialog-form" onSubmit={(event) => { event.preventDefault(); onUpdateWork({ description: workGoal.trim(), projectRoot: projectRoot.trim() || null }); setDialog(null); }}>
-          <label>{t("Goal")}<AutoTextarea value={workGoal} onChange={(event) => setWorkGoal(event.target.value)} /></label>
-          <label>{t("Project directory")}<div className="sand-work-path-input"><input value={projectRoot} onChange={(event) => setProjectRoot(event.target.value)} placeholder={t("Choose a local folder")} /><button type="button" onClick={async () => { const path = await onPickDirectory(); if (path) setProjectRoot(path); }}>{t("Browse")}</button></div></label>
-          <button className="sand-work-primary" type="submit">{t("Save changes")}</button>
-        </form>
-      </WorkDialog> : null}
+
 
     </section>
   );

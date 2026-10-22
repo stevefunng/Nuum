@@ -20,7 +20,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function rpcSmoke() {
   const dataDir = await mkdtemp(path.join(tmpdir(), "nuum-smoke-"));
-  const host = spawn("node", [hostEntry, "--data-dir", dataDir, "--kernel-entry", kernelEntry], {
+  const host = spawn("node", [hostEntry, "--data-dir", dataDir, "--kernel-entry", kernelEntry, "--documents-dir", path.join(dataDir, "Documents")], {
     stdio: ["pipe", "pipe", "inherit"]
   });
   const lines = [];
@@ -58,7 +58,7 @@ async function orphanSmoke() {
       `const { spawn } = require("node:child_process");
        const child = spawn("node", [${JSON.stringify(hostEntry)},
          "--data-dir", ${JSON.stringify(dataDir)},
-         "--kernel-entry", ${JSON.stringify(kernelEntry)}], { stdio: ["pipe", "pipe", "inherit"] });
+         "--kernel-entry", ${JSON.stringify(kernelEntry)}, "--documents-dir", ${JSON.stringify(path.join(dataDir, "Documents"))}], { stdio: ["pipe", "pipe", "inherit"] });
        console.log(String(child.pid));
        setInterval(() => {}, 1000);`
     ],
@@ -70,7 +70,7 @@ async function orphanSmoke() {
   });
   await sleep(800);
   const kernelPid = await new Promise((resolve) => {
-    const ps = spawn("pgrep", ["-P", String(hostPid)]);
+    const ps = spawn("pgrep", ["-P", String(hostPid), "-f", kernelEntry]);
     let out = "";
     ps.stdout.on("data", (chunk) => (out += chunk));
     ps.on("close", () => resolve(Number(out.trim().split("\n")[0]) || null));

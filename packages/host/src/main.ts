@@ -13,6 +13,9 @@ const kernelEntry = readFlag("--kernel-entry") ?? defaultKernel;
 
 const runtime = await createHostServer({
   dataDir,
+  privateDir: readFlag("--private-dir"),
+  documentsDir: readFlag("--documents-dir") ?? path.join(homedir(), "Documents"),
+  executorEntry: readFlag("--executor-entry") ?? path.resolve(here, "../../executor/dist/main.js"),
   kernelCommand,
   kernelArgs: kernelCommand === process.execPath ? [kernelEntry] : []
 });
@@ -29,10 +32,14 @@ for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
   process.once(signal, shutdown);
 }
 
-// stdin 关闭说明父进程没了。不退出就会变成孤儿：一直持着 dataDir 锁，把下一次
-// 启动挡在门外，还带着自己那个 Kernel 子进程一起漏。
-process.stdin.on("end", shutdown);
-process.stdin.on("close", shutdown);
+// Unexpected Desktop disconnect stops the harness, while accepted executor work can be adopted.
+function detach(): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  void runtime.detach().finally(() => process.exit(0));
+}
+process.stdin.on("end", detach);
+process.stdin.on("close", detach);
 
 function readFlag(name: string): string | undefined {
   const index = args.indexOf(name);

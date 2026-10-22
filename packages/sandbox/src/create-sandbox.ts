@@ -82,7 +82,8 @@ class LocalSandbox implements SandboxPort {
         ? this.allow(action, target, "Work read-only knowledge root")
         : this.deny(action, target, "Path is a Work read-only knowledge root.");
     }
-    if (!contains(home, target)) {
+    const scratchRoot = await realpathExistingPrefix(path.resolve(this.options.roots.scratch));
+    if (!contains(home, target) && !contains(scratchRoot, target)) {
       return this.deny(action, target, "Path is outside the allowed local execution root.");
     }
 
@@ -121,7 +122,8 @@ class LocalSandbox implements SandboxPort {
   async resolvePath(input: string): Promise<string> {
     const resolved = await this.canonicalPath(input);
     const home = await realpathExistingPrefix(path.resolve(this.options.roots.home));
-    if (!contains(home, resolved)) {
+    const scratchRoot = await realpathExistingPrefix(path.resolve(this.options.roots.scratch));
+    if (!contains(home, resolved) && !contains(scratchRoot, resolved)) {
       this.audit("resolve", false, { path: resolved, detail: "outside local execution root" });
       throw new RpcError(KernelErrorCode.SANDBOX, `Path is outside the allowed local execution root: ${input}`);
     }

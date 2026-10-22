@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld("nuum", {
     openProactiveAgent: (agentId: string) => ipcRenderer.invoke(DesktopMethods.proactiveOpenAgent, { agentId }),
     showMain: () => ipcRenderer.invoke(DesktopMethods.mainShow),
     quit: () => ipcRenderer.invoke(DesktopMethods.appQuit),
+    openPath: (file: string) => ipcRenderer.invoke(DesktopMethods.shellOpenPath, file) as Promise<string>,
     pickWorkspace: () => ipcRenderer.invoke(DesktopMethods.workspacePick) as Promise<string | null>,
     getSecrets: () => ipcRenderer.invoke(DesktopMethods.secretsGet) as Promise<SecretsState>,
     setSecrets: (secrets: SecretsState) => ipcRenderer.invoke(DesktopMethods.secretsSet, secrets)

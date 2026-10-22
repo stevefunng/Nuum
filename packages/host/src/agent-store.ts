@@ -222,16 +222,18 @@ export class AgentStore {
     id: string,
     patch: { profile?: Partial<AgentProfile>; settings?: Partial<AgentSettings> }
   ): Promise<AgentRecord> {
-    const current = this.requireAgent(id);
-    const next: AgentRecord = {
-      profile: { ...current.profile, ...patch.profile, id: current.profile.id },
-      settings: { ...current.settings, ...patch.settings },
-      lastActivityAt: current.lastActivityAt
-    };
-    if (patch.profile) await writeJsonAtomic(path.join(this.agentDir(id), "profile.json"), next.profile);
-    if (patch.settings) await writeJsonAtomic(path.join(this.agentDir(id), "settings.json"), next.settings);
-    this.agents.set(id, next);
-    return next;
+    return this.chain(id, async () => {
+      const current = this.requireAgent(id);
+      const next: AgentRecord = {
+        profile: { ...current.profile, ...patch.profile, id: current.profile.id },
+        settings: { ...current.settings, ...patch.settings },
+        lastActivityAt: current.lastActivityAt
+      };
+      if (patch.profile) await writeJsonAtomic(path.join(this.agentDir(id), "profile.json"), next.profile);
+      if (patch.settings) await writeJsonAtomic(path.join(this.agentDir(id), "settings.json"), next.settings);
+      this.agents.set(id, next);
+      return next;
+    });
   }
 
   async deleteAgent(id: string): Promise<void> {

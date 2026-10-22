@@ -1,3 +1,4 @@
+import { ExecutionEndpoint } from "./execution.js";
 import { z } from "zod";
 import {
   ChatMessage,
@@ -42,6 +43,7 @@ export const KernelEvents = {
  * `runId → agentId` 的映射由 Host 自己维护。
  */
 export const TurnStartParams = z.object({
+  execution: ExecutionEndpoint.extend({ contextId: z.string() }).optional(),
   runId: z.string(),
   messages: z.array(ChatMessage),
   contextWindow: z.number().positive().optional(),
@@ -131,7 +133,10 @@ export const TurnToolPendingEvent = z.object({
   arguments: z.record(z.unknown()),
   mutating: z.boolean(),
   action: LocalToolAction,
-  target: z.string()
+  target: z.string(),
+  justification: z.string().optional(),
+  allowAlways: z.boolean().optional(),
+  details: z.string().optional()
 });
 export type TurnToolPendingEvent = z.infer<typeof TurnToolPendingEvent>;
 

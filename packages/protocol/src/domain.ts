@@ -1,3 +1,4 @@
+import { ExternalGrant, NetworkTarget } from "./permission-rules.js";
 import { ProactivePolicy } from "./proactive.js";
 import { z } from "zod";
 import { WorkMembership } from "./work.js";
@@ -11,7 +12,7 @@ export const DEFAULT_MODEL_ID: Record<ProviderId, string> = {
   deepseek: "deepseek-chat"
 };
 
-export const LocalToolAction = z.enum(["read-file", "list-directory", "write-file", "run-command"]);
+export const LocalToolAction = z.enum(["read-file", "list-directory", "write-file", "run-command", "network"]);
 export type LocalToolAction = z.infer<typeof LocalToolAction>;
 
 export const ToolPermission = z.enum(["always", "ask", "never"]);
@@ -91,7 +92,18 @@ export type AgentProfile = z.infer<typeof AgentProfile>;
 /**
  * settings.json — 该 agent 的可配项。
  */
+export { NetworkTarget } from "./permission-rules.js";
+export const ExecutionPreferences = z.object({
+  workspaceId: z.string(),
+  commands: z.enum(["ask", "always", "never"]).default("ask"),
+  commandGrants: z.array(z.object({ workspaceId: z.string(), command: z.string().min(1) })).default([]),
+  externalGrants: z.array(ExternalGrant).optional(),
+  networkGrants: z.array(z.object({ workspaceId: z.string(), target: NetworkTarget })).default([])
+});
+export type ExecutionPreferences = z.infer<typeof ExecutionPreferences>;
+
 export const AgentSettings = z.object({
+  execution: ExecutionPreferences.optional(),
   model: ModelRef,
   workspace: z.object({
     projectRoot: z.string().nullable(),

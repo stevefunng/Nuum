@@ -14,7 +14,6 @@ import {
   type PublicSettings,
   type SidebarOrganization,
   type ThemePreference,
-  type ToolPermission,
   type ToolResolution,
   type TranscriptEvent,
   type ViewBlock,
@@ -53,8 +52,10 @@ type AgentPane = {
     toolCallId: string;
     name: string;
     arguments: Record<string, unknown>;
-    action: "read-file" | "list-directory" | "write-file" | "run-command";
+    action: "read-file" | "list-directory" | "write-file" | "run-command" | "network";
+    workId?: string;
     target: string;
+    justification?: string; allowAlways?: boolean; details?: string;
   } | null;
   draft: string;
 };
@@ -210,6 +211,8 @@ export function App() {
             name: payload.name,
             arguments: payload.arguments ?? {},
             action: payload.action,
+            workId: payload.workId,
+            justification: payload.justification, allowAlways: payload.allowAlways, details: payload.details,
             target: payload.target
           }
         }));
@@ -346,10 +349,9 @@ export function App() {
     setWorkSnapshot(null);
   }
 
-  async function createWork(input: { name: string; description: string; kind?: "room" | "work" }): Promise<void> {
+  async function createWork(input: { name: string; kind?: "room" | "work" }): Promise<void> {
     const created = await window.nuum.host.request(HostMethods.workCreate, {
-      ...input,
-      projectRoot: null
+      ...input
     }) as WorkProfile;
     await refreshWorks();
     await openWork(created.id);
@@ -481,21 +483,6 @@ export function App() {
     });
   }
 
-  async function updateActiveWorkspace(patch: {
-    projectRoot?: string | null;
-    toolPermission?: ToolPermission | null;
-  }): Promise<void> {
-    if (!active) return;
-    const current = active.settings.workspace ?? { projectRoot: null, toolPermission: null };
-    const updated = await window.nuum.host.request(HostMethods.agentUpdate, {
-      id: active.profile.id,
-      workspace: {
-        projectRoot: patch.projectRoot !== undefined ? patch.projectRoot : current.projectRoot,
-        toolPermission: patch.toolPermission !== undefined ? patch.toolPermission : current.toolPermission
-      }
-    }) as AgentView;
-    setAgents((items) => upsert(items, updated));
-  }
 
   return (
     <div className="sand-app">
@@ -542,6 +529,8 @@ export function App() {
             onPickDirectory={() => window.nuum.desktop.pickWorkspace()}
             agents={agents}
             snapshot={workSnapshot}
+            approvals={Object.entries(panes).flatMap(([agentId, pane]) => pane.pendingTool?.workId === activeWorkId ? [{ ...pane.pendingTool, agentId, agentName: agents.find(agent => agent.profile.id === agentId)?.profile.name ?? "Nunu" }] : [])}
+            onApproveTool={(agentId, resolution) => approveAgent(agentId, resolution)}
             onUpdateWork={(patch) => void runWorkMutation(() => window.nuum.host.request(HostMethods.workUpdate, {
               id: activeWorkId,
               ...patch
@@ -612,7 +601,7 @@ export function App() {
             creatingAgent={creatingAgent}
             canCancelCreate={agents.length > 0}
             creationError={creationError}
-            pendingTool={pane.pendingTool}
+            pendingTool={pane.pendingTool?.workId ? null : pane.pendingTool}
             draft={draft}
             notice={pane.notice}
             onDraftChange={(value) => {
@@ -622,7 +611,7 @@ export function App() {
             onCancel={() => activeId && void window.nuum.host.request(HostMethods.agentCancel, { id: activeId })}
             onCancelCreate={cancelCreate}
             onCreateAgent={(profile) => void createAgent(profile)}
-            onApprove={(resolution) => void approve(resolution)}
+            onApprove={(resolution) => approve(resolution)}
             onAnswerWidget={answerWidget}
             onOpenProfile={() => active && setProfileEditorId((current) => current === active.profile.id ? null : active.profile.id)}
           />
@@ -631,7 +620,13 @@ export function App() {
 
       </div>
       {active && profileEditorId === active.profile.id && !creatingAgent && !activeWorkId && !creatingWork ? (
-        <AgentProfilePanel key={active.profile.id} profile={active.profile} onClose={() => setProfileEditorId(null)} onSave={(patch) => {
+        <AgentProfilePanel key={active.profile.id} profile={active.profile} settings={active.settings}
+          workspaceNames={Object.fromEntries(works.filter(work => work.workspaceId).map(work => [work.workspaceId!, work.name]))}
+          onOpenWorkspace={() => { if (active.settings.workspace?.projectRoot) void window.nuum.desktop.openPath(active.settings.workspace.projectRoot); }}
+          onSaveExecution={async execution => {
+            const updated = await window.nuum.host.request(HostMethods.agentUpdate, { id: active.profile.id, execution }) as AgentView;
+            setAgents(items => upsert(items, updated));
+          }} onClose={() => setProfileEditorId(null)} onSave={(patch) => {
           const id = active.profile.id;
           const save = profileSave.current.then(async () => {
             const updated = await window.nuum.host.request(HostMethods.agentUpdate, { id, ...patch }) as AgentView;
@@ -680,65 +675,6 @@ export function App() {
                   <option value="system">{t("Follow system")}</option>
                   <option value="light">{t("Light")}</option>
                   <option value="dark">{t("Dark")}</option>
-                </SettingsSelect>
-              </div>
-            </div>
-            </div></section>
-            <section className="sand-settings-group"><h3>{t("Workspace and permissions")}</h3><div className="sand-settings-group__surface">
-            <div className="sand-settings-row">
-              <div className="sand-settings-copy">
-                <span>{t("Active agent project")}</span>
-                <small>{t("Pre-approved read/write scope and default working directory for this agent.")}</small>
-              </div>
-              <div className="sand-settings-control">
-                <SandWorkspace
-                  value={active?.settings.workspace?.projectRoot ?? ""}
-                  onPick={async () => {
-                    const folder = await window.nuum.desktop.pickWorkspace();
-                    if (!folder) return;
-                    await updateActiveWorkspace({ projectRoot: folder });
-                  }}
-                  onClear={() => void updateActiveWorkspace({ projectRoot: null })}
-                />
-              </div>
-            </div>
-            <div className="sand-settings-row">
-              <div className="sand-settings-copy">
-                <span>{t("Active agent permission")}</span>
-                <small>{t("Override the global default for local file and command actions.")}</small>
-              </div>
-              <div className="sand-settings-control">
-                <SettingsSelect aria-label={t("Active agent permission")}
-                  value={active?.settings.workspace?.toolPermission ?? "follow"}
-                  onChange={(event) => void updateActiveWorkspace({
-                    toolPermission: event.target.value === "follow" ? null : event.target.value as ToolPermission
-                  })}
-                >
-                  <option value="follow">{t("Follow global")}</option>
-                  <option value="ask">{t("Ask")}</option>
-                  <option value="always">{t("Always")}</option>
-                  <option value="never">{t("Never")}</option>
-                </SettingsSelect>
-              </div>
-            </div>
-            <div className="sand-settings-row">
-              <div className="sand-settings-copy">
-                <span>{t("Default local-tool permission")}</span>
-                <small>{t("Used by agents that follow the global setting. Hard safety blocks always remain.")}</small>
-              </div>
-              <div className="sand-settings-control">
-                <SettingsSelect aria-label={t("Default local-tool permission")}
-                  value={settings?.defaultToolPermission ?? "ask"}
-                  onChange={async (event) => {
-                    const next = await window.nuum.host.request(HostMethods.settingsSet, {
-                      defaultToolPermission: event.target.value
-                    }) as PublicSettings;
-                    setSettings(next);
-                  }}
-                >
-                  <option value="ask">{t("Ask")}</option>
-                  <option value="always">{t("Always")}</option>
-                  <option value="never">{t("Never")}</option>
                 </SettingsSelect>
               </div>
             </div>
@@ -830,16 +766,6 @@ export function App() {
         )}
       </SettingsOverlay>
     </div>
-  );
-}
-
-function SandWorkspace({ value, onPick, onClear }: { value: string; onPick(): void; onClear(): void }) {
-  return (
-    <>
-      <input readOnly value={value || t("No workspace selected")} />
-      <button className="sand-kit-button sand-1tiofj7" onClick={onPick} type="button">{t("Choose")}</button>
-      {value ? <button className="sand-kit-button sand-1tiofj7" onClick={onClear} type="button">{t("Clear")}</button> : null}
-    </>
   );
 }
 

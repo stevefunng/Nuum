@@ -59,3 +59,17 @@
 .sand-nunu-badge__seal { transform: translateX(-50%) rotateX(var(--seal-rx, 0deg)) rotateY(var(--seal-ry, 0deg)); pointer-events: none; }
 .sand-nunu-badge__avatar { pointer-events: auto; }
 @media (prefers-reduced-motion: reduce) { .sand-nunu-badge__seal { transform: translateX(-50%); } }
+
+.sand-execution-widget { display: grid; gap: 12px; padding: 12px; border: 1px solid var(--nuum-stroke-tertiary); border-radius: 9px; color: var(--nuum-text-primary); font-size: 12px; }
+.sand-execution-widget > header { font-weight: 500; }
+.sand-execution-widget__row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.sand-execution-widget p { margin: 0; color: var(--nuum-text-secondary); font-size: 11px; overflow-wrap: anywhere; }
+.sand-execution-widget button, .sand-execution-widget select { height: 28px; padding: 0 8px; border: 1px solid var(--nuum-stroke-tertiary); border-radius: 6px; color: inherit; background: var(--nuum-bg-editor); font: inherit; }
+.sand-execution-widget button:hover { background: var(--nuum-bg-elevated); }
+.sand-execution-widget :is(button, select):focus-visible { outline: 2px solid var(--nuum-text-secondary); outline-offset: 2px; }
+.sand-execution-widget :disabled { opacity: .5; cursor: wait; }
+.sand-execution-widget ul { display: grid; gap: 8px; padding: 0; margin: 0; list-style: none; }
+.sand-execution-widget li { display: flex; gap: 8px; justify-content: space-between; align-items: center; }
+.sand-execution-widget li > div { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.sand-execution-widget small { color: var(--nuum-text-secondary); }
+.sand-execution-widget [role="alert"] { color: var(--nuum-text-red-primary); }

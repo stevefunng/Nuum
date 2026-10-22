@@ -103,7 +103,7 @@ function writeSecrets(secrets: SecretsState): void {
 function startHost(): JsonRpcPeer {
   const hostEntry = path.join(repoRoot, "packages/host/dist/main.js");
   const kernelEntry = path.join(repoRoot, "packages/kernel/dist/main.js");
-  const child = spawn("node", [hostEntry, "--data-dir", dataDir, "--kernel-entry", kernelEntry], {
+  const child = spawn("node", [hostEntry, "--private-dir", app.getPath("userData"), "--data-dir", dataDir, "--kernel-entry", kernelEntry, "--documents-dir", process.env.NUUM_DOCUMENTS_DIR ?? app.getPath("documents")], {
     stdio: ["pipe", "pipe", "pipe"]
   });
   host = child;
@@ -229,6 +229,7 @@ ipcMain.handle(DesktopMethods.secretsSet, (_event, secrets: SecretsState) => {
   writeSecrets(secrets);
   return { ok: true };
 });
+ipcMain.handle(DesktopMethods.shellOpenPath, (_event, file: string) => shell.openPath(file));
 ipcMain.handle(DesktopMethods.shellOpenExternal, (_event, url: string) => shell.openExternal(url));
 
 function stopHost(): void {

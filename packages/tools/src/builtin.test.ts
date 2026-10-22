@@ -52,7 +52,7 @@ async function fixture(t: TestContext) {
 test("the rebuilt local tool surface ends with the persistent shell", () => {
   assert.deepEqual(
     builtinTools.map((tool) => tool.definition.name),
-    ["read", "write", "str_replace", "multi_str_replace", "delete", "ls", "glob", "grep", "shell"]
+    ["read", "write", "str_replace", "multi_str_replace", "delete", "ls", "glob", "grep", "shell", "request_network", "external_operation"]
   );
   assert.equal(shellTool.definition.action, "run-command");
 });
