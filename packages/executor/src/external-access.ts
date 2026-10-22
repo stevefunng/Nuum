@@ -35,8 +35,8 @@ export async function prepareExternal(input: unknown, context: ExecutionContext,
     grant.writePaths = [...new Set(await Promise.all(operation.writePaths.map(validate)))].sort();
     if (!inside(context.root, grant.cwd) && ![...grant.readPaths, ...grant.writePaths].some(p => inside(p, grant.cwd!))) throw new Error("External cwd must be included in requested paths");
     grant.command = commandRule(operation.command);
-    // System git is the only generalized executable. Other scripts keep exact commands and
-    // readable regular-file fingerprints; directory grants are explicit resource permissions.
+    // Query grammars may generalize arguments, but executable and directly referenced
+    // file fingerprints still apply; directory grants remain explicit resource permissions.
     for (const p of [...grant.readPaths, ...grant.writePaths]) {
       const stat = await lstat(p).catch(() => null);
       if (stat?.isFile()) {

@@ -8,11 +8,49 @@ const CommandAtom = z.discriminatedUnion("kind", [
 ]);
 export const CommandRule = z.union([CommandAtom, z.object({ kind: z.literal("compound"), commands: z.array(CommandAtom), operators: z.array(z.string()) })]);
 export type CommandRule = z.infer<typeof CommandRule>;
+// Explicit option grammars: unknown flags, extra positionals and missing values fail closed.
+interface QueryGrammar {
+  flags: readonly string[];
+  values?: Record<string, RegExp>;
+  positional?: RegExp;
+  required?: readonly string[];
+}
+const positiveCount = /^[1-9][0-9]{0,3}$/;
+const ghValues = { "--json": /^[a-zA-Z]+(?:,[a-zA-Z]+)*$/, "--repo": /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/ };
+const queryGrammars: Record<string, QueryGrammar> = {
+  "git log": { flags: ["--oneline", "--graph", "--all", "--reverse", "--no-merges", "--first-parent", "--no-decorate"], values: { "-n": positiveCount, "--max-count": positiveCount } },
+  "git diff": { flags: ["--no-ext-diff", "--no-textconv", "--stat", "--name-only", "--name-status", "--numstat", "--shortstat", "--cached", "--staged", "--check"], required: ["--no-ext-diff", "--no-textconv"] },
+  "gh issue view": { flags: ["--comments"], values: ghValues, positional: /^[1-9][0-9]*$/ },
+  "gh pr list": { flags: [], values: { ...ghValues, "--limit": positiveCount, "--state": /^(open|closed|merged|all)$/ } },
+  "gh issue list": { flags: [], values: { ...ghValues, "--limit": positiveCount, "--state": /^(open|closed|all)$/ } },
+  "gh run list": { flags: [], values: { ...ghValues, "--limit": positiveCount } },
+  "gh run view": { flags: ["--verbose"], values: ghValues, positional: /^[1-9][0-9]*$/ }
+};
+function queryArgumentsMatch(args: string[], grammar: QueryGrammar): boolean {
+  let positionals = 0;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (grammar.flags.includes(arg)) continue;
+    const equals = arg.indexOf("=");
+    const option = equals > 0 ? arg.slice(0, equals) : arg;
+    const pattern = grammar.values?.[option];
+    if (pattern) {
+      if (!pattern.test(equals > 0 ? arg.slice(equals + 1) : args[++i] ?? "")) return false;
+      continue;
+    }
+    if (grammar.positional?.test(arg) && positionals++ === 0) continue;
+    return false;
+  }
+  return (!grammar.positional || positionals === 1) && (grammar.required ?? []).every(flag => args.includes(flag));
+}
 // Recognize only argument grammars whose prefix can be reused without swallowing shell syntax.
 function reusablePrefix(command: string): string[] | undefined {
   const words = staticShellWords(command);
   if (!words) return;
   const program = words[0]!.split("/").at(-1);
+  const prefix = program === "git" ? [program, words[1]] : [program, words[1], words[2]];
+  const grammar = queryGrammars[prefix.join(" ")];
+  if (grammar && queryArgumentsMatch(words.slice(prefix.length), grammar)) return prefix as string[];
   if (program === "git" && words[1] === "status" && words.slice(2).every(word => /^(--short|--porcelain(?:=v[12])?|--branch|-s|-b)$/.test(word))) return ["git", "status"];
   if (program === "gh" && words[1] === "pr" && words[2] === "view") {
     const args = words.slice(3);

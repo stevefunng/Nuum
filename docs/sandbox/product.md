@@ -56,11 +56,20 @@
 |---|---|
 | git status | 仅识别 --short、--porcelain（含 =v1/=v2）、--branch、-s、-b 这些参数；符合语法时归一为 git status 规则 |
 | gh pr view | 仅识别数字 PR、--comments、--json 的字段列表、--repo owner/repo；其余参数不泛化 |
+| git log | --oneline、--graph、--all、--reverse、--no-merges、--first-parent、--no-decorate；-n/--max-count 的 1–9999 数量；不接受 -p、自定义格式、输出文件、revision/path 参数 |
+| git diff | 必须同时有 --no-ext-diff 和 --no-textconv；可变 --stat、--name-only、--name-status、--numstat、--shortstat、--cached、--staged、--check；不接受额外路径、revision、外部 diff 或输出文件 |
+| gh issue view | 一个正整数编号、--comments、--json、--repo |
+| gh pr list / gh issue list | --limit（1–9999）、--state、--json、--repo；state 为 open/closed/all，PR 额外允许 merged |
+| gh run list / gh run view | list 支持 --limit、--json、--repo；view 要求一个正整数编号，支持 --verbose、--json、--repo，不包含 --log/--web |
 | 其他静态命令 | 保留完整命令精确匹配 |
 | 简单 &&、\|\|、分号、管道链 | 每段形成规则；段数、顺序、连接符及各段规则均须一致 |
 | 重定向、展开、命令替换等动态语法 | 不生成长期规则；「始终允许」不可用，只能单次批准 |
 
-识别前缀并不单独构成授权：可执行文件必须可解析，直接文件参数和可执行文件需通过摘要检查。无法解析或无法建立摘要的调用可能只能单次批准。摘要不递归覆盖所有导入依赖；不将其描述为完整代码身份保证。
+新增的有值选项支持 `--option value` 和 `--option=value`；不接受未知参数、缺失值或额外位置参数。既有精确命令授权保持精确，不因规则扩充自动迁移为命令族授权。
+
+参数语义核对来源：[Git log](https://git-scm.com/docs/git-log)、[Git diff](https://git-scm.com/docs/git-diff)、[GitHub CLI 手册](https://cli.github.com/manual/)。Nuum 仅支持上表子集。
+
+识别前缀并不单独构成授权：可执行文件必须可解析，直接文件参数和可执行文件需通过摘要检查。无法解析或无法建立摘要的调用可能只能单次批准。外部 shell 的 PATH 固定为系统路径；例如 Homebrew 的 gh 通常需要明确使用可执行文件绝对路径，并满足原有读取权限，规则识别不会自动安装或开放该程序。摘要不递归覆盖所有导入依赖；不将其描述为完整代码身份保证。
 
 网络只接受精确主机和 80/443 端口。允许某主机不代表允许其他域名；跳转或其他服务目标需要相应权限。授权不提供关闭沙箱选项。
 
