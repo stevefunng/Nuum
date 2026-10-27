@@ -1337,3 +1337,25 @@ test("a cancelled run cannot commit its late background summary", async (t) => {
   await quiet();
   assert.equal((await harness.runtime.store.readTranscript(id)).some(event => event.type === "compact"), false);
 });
+
+test("attachment-only sends persist UI metadata and replay image input after restart", async (t) => {
+  const h = await openHarness(t);
+  await h.runtime.setSettings({ openaiApiKey: "test-key" });
+  const agent = await h.runtime.createAgent({ name: "Attachment reader", model: { provider: "openai", model: "gpt-4o" } });
+  const id = agent.profile.id;
+  const data = "aGVsbG8=";
+  await h.runtime.send(id, "", { attachments: [{ name: "sample.png", mimeType: "image/png", data }, { name: "note.txt", mimeType: "text/plain", data: Buffer.from("attachment test content").toString("base64") }] });
+  const input = h.kernel.started[0]!.messages.find(message => message.role === "user")!;
+  assert.equal(input.images?.[0]?.data, data);
+  assert.match(input.content, /attachment test content/);
+  const snapshot = await h.runtime.getAgent(id);
+  const user = snapshot.blocks.find(block => block.type === "user")!;
+  assert.equal(user.type === "user" && user.attachments?.length, 2);
+  const transcript = await readFile(h.runtime.store.transcriptFile(id), "utf8");
+  assert.equal(transcript.includes(data), false, "base64 must not be persisted in JSONL");
+  await h.runtime.dispose();
+  const reopened = await openHarness(t, { dataDir: h.dataDir });
+  await reopened.runtime.setSettings({ openaiApiKey: "test-key" });
+  await reopened.runtime.send(id, "Look again");
+  assert.equal(reopened.kernel.started[0]!.messages.find(message => message.id === input.id)?.images?.[0]?.data, data);
+});

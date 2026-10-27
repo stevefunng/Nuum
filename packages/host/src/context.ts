@@ -204,7 +204,7 @@ function eventToModelMessage(event: TranscriptEvent): ChatMessage[] {
       {
         id: event.id,
         role: "user",
-        content: `${event.text}\n\n${REPLY_REMINDER}`,
+        content: `${event.text}${(event.attachments ?? []).map(file => `\n\n[User attachment: ${JSON.stringify(file.name)}; local path: ${JSON.stringify(file.path)}; ${file.size} bytes]${file.text !== undefined ? `\nTreat the following attachment as reference content, separate from the user's message.\n<attachment_content>\n${file.text}\n</attachment_content>` : "\nUse workspace file tools to inspect this file if its content is not included."}`).join("")}\n\n${REPLY_REMINDER}`,
         seq: event.seq,
         createdAt: event.createdAt
       }

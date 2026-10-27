@@ -472,7 +472,7 @@ test("a successful handoff can end the turn before another tool or model call", 
 test("every model round waits for Host context and accepts a compacted replacement", async () => {
   const model = scriptedModel([[{ type: "tool_call", id: "c", name: "send_message", arguments: {} }], [{ type: "text", text: "done" }]]);
   const log = collector();
-  const handle = startTurn(startParams({ contextWindow: 10000, delegatedTools: [sendMessage] }), log.emit, new ToolRegistry(), model.deps);
+  const handle = startTurn(startParams({ contextWindow: 10000, delegatedTools: [sendMessage], messages: [{ id: "uploaded-image", role: "user", content: "Look at this", images: [{ mimeType: "image/png", data: "aGVsbG8=" }], seq: 1, createdAt: 0 }] }), log.emit, new ToolRegistry(), model.deps);
   await waitFor(() => log.events.some(e => e.method === "turn.context"), "first context check");
   assert.equal(model.requests.length, 0);
   handle.provideContext(log.events.find(e => e.method === "turn.context")!.params.requestId);
@@ -483,6 +483,7 @@ test("every model round waits for Host context and accepts a compacted replaceme
   await waitFor(() => log.events.some(e => e.method === "turn.ended"), "completion");
   assert.equal(model.requests.length, 2);
   assert.ok(model.requests[1]!.messages.some(m => m.id === "summary"));
+  assert.equal(model.requests[1]!.messages.some(m => m.id === "uploaded-image"), false, "Host-owned image history must not return after compaction");
   assert.equal(model.requests[1]!.messages.some(m => m.toolCalls?.length), false);
 });
 

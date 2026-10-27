@@ -1,3 +1,4 @@
+import { UserAttachment } from "./attachments.js";
 import { z } from "zod";
 import { ChatMessage } from "./domain.js";
 
@@ -129,6 +130,7 @@ export const TranscriptEvent = z.discriminatedUnion("type", [
     seq: z.number().int(),
     createdAt: z.number(),
     text: z.string(),
+    attachments: z.array(UserAttachment).optional(),
     /**
      * 这条用户消息是对某个提问卡片（widget message 事件）的回答，值是那张卡
      * 的事件 id。投影据此在卡片上标出选中项；旧转录与普通消息没有该字段。
@@ -231,6 +233,7 @@ export const ViewBlock = z.discriminatedUnion("type", [
     type: z.literal("user"),
     id: z.string(),
     text: z.string(),
+    attachments: z.array(UserAttachment).optional(),
     /** 对提问卡片的回答：值是被回答的 message 块 id，UI 据此标出选中项。 */
     widgetAnswerTo: z.string().optional()
   }),
@@ -429,6 +432,7 @@ export function projectAgent(
         type: "user",
         id: event.id,
         text: event.text,
+        ...(event.attachments?.length ? { attachments: event.attachments } : {}),
         ...(event.widgetAnswerTo ? { widgetAnswerTo: event.widgetAnswerTo } : {})
       });
       continue;

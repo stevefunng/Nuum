@@ -138,8 +138,8 @@ export function startTurn(
         const next = await pending;
         if (next.error) throw new Error(next.error);
         if (next.messages) {
-          // Images and reminders are Kernel-local; keep them when Host rebuilds the persisted history.
-          const local = messages.filter(message => message.images?.length || message.id.startsWith("reminder-"));
+          // Only tool-returned images and reminders are Kernel-local; uploaded images belong to Host history.
+          const local = messages.filter(message => message.id.startsWith("tool-images-") || message.id.startsWith("reminder-"));
           messages.splice(0, messages.length, ...next.messages, ...local.filter(message => !next.messages!.some(item => item.id === message.id)));
         }
         if (estimateModelTokens(messages, tools) > params.contextWindow * 0.9) throw new Error("Context capacity exhausted; execution paused without replaying tools.");
@@ -212,7 +212,7 @@ export function startTurn(
       }
       if (toolImages.length > 0) {
         messages.push({
-          id: crypto.randomUUID(),
+          id: `tool-images-${crypto.randomUUID()}`,
           role: "user",
           content: "Images returned by the preceding local read tool calls.",
           images: toolImages,

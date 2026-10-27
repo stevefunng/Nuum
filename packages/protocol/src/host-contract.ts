@@ -1,3 +1,4 @@
+import { AttachmentUpload, MAX_ATTACHMENTS } from "./attachments.js";
 import { z } from "zod";
 import {
   AgentSettings,
@@ -299,8 +300,9 @@ export type TranscriptPage = z.infer<typeof TranscriptPage>;
 
 export const AgentSendParams = z.object({
   id: z.string(),
-  content: z.string().min(1)
-});
+  content: z.string(),
+  attachments: z.array(AttachmentUpload).max(MAX_ATTACHMENTS).optional()
+}).refine(value => value.content.trim().length > 0 || Boolean(value.attachments?.length), "A message or attachment is required");
 export type AgentSendParams = z.infer<typeof AgentSendParams>;
 
 /** 回答提问卡片：value 原样成为用户消息，messageId 指回那张卡片供投影标选中项。 */

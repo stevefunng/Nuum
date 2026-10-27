@@ -15,3 +15,5 @@ export * from "./context-budget.js";
 export * from "./execution.js";
 
 export * from "./permission-rules.js";
+
+export * from "./attachments.js";

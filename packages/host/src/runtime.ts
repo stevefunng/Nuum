@@ -1,3 +1,5 @@
+import { saveAttachments, hydrateAttachmentImages } from "./attachments.js";
+import type { AttachmentUpload } from "@nuum/protocol";
 import { permissionOperationKey } from "@nuum/protocol";
 import { WorkspaceStore } from "./workspaces.js";
 import { executionPolicy, recoverExecutionResult } from "./execution-recovery.js";
@@ -904,7 +906,7 @@ export class HostRuntime implements Partial<DelegateHost> {
   async send(
     id: string,
     content: string,
-    options: { widgetAnswerTo?: string } = {}
+    options: { widgetAnswerTo?: string; attachments?: AttachmentUpload[] } = {}
   ): Promise<{ ok: true; runId: string; queued: boolean }> {
     const record = this.store.requireAgent(id);
     const model = resolveSessionModel({
@@ -928,15 +930,20 @@ export class HostRuntime implements Partial<DelegateHost> {
 
     const { events } = await this.readModelTranscript(id);
     // 用户消息先落盘再排队：即使全局并发已满、这个 run 要等，消息也立刻出现在时间线上。
+    const uploads = options.attachments ?? [];
+    const root = record.settings.workspace?.projectRoot;
+    if (uploads.length && !root) throw new Error("No workspace is available for attachments.");
+    const attachments = uploads.length ? await saveAttachments(root!, uploads) : [];
     const user = await this.store.appendEvent(id, {
       type: "user",
       id: crypto.randomUUID(),
       text: content,
+      ...(attachments.length ? { attachments } : {}),
       ...(options.widgetAnswerTo ? { widgetAnswerTo: options.widgetAnswerTo } : {}),
       createdAt: Date.now()
     });
     if (record.profile.name === DEFAULT_AGENT_NAME && events.length === 0) {
-      await this.store.updateAgent(id, { profile: { name: deriveName(content) } });
+      await this.store.updateAgent(id, { profile: { name: deriveName(content || attachments[0]?.name || DEFAULT_AGENT_NAME) } });
     }
     if (record.settings.model !== model) {
       await this.store.updateAgent(id, { settings: { model } });
@@ -1016,7 +1023,8 @@ export class HostRuntime implements Partial<DelegateHost> {
           ...(execution ? { execution } : {}),
           runId: activeRunId,
           ...(this.kernel!.provideContext ? { contextWindow: this.contextWindow(model) } : {}),
-          messages: assembled,
+          messages: record.settings.workspace?.projectRoot
+            ? await hydrateAttachmentImages(assembled, replayed, record.settings.workspace.projectRoot, model) : assembled,
           model,
           roots,
           toolPermission: record.settings.execution?.commands ?? record.settings.workspace?.toolPermission ?? this.settings.defaultToolPermission,
@@ -2045,6 +2053,8 @@ export class HostRuntime implements Partial<DelegateHost> {
             transcript = await this.readModelTranscript(agentId, context);
             const prompt = await this.buildSystemPrompt(agentId, true, context);
             messages = assembleContext({ transcript: transcript.events, systemPrompt: prompt.text, notices: prompt.notices });
+            const root = this.store.requireAgent(agentId).settings.workspace?.projectRoot;
+            if (root) messages = await hydrateAttachmentImages(messages, transcript.events, root, model);
           }
         }
         await this.kernel?.provideContext?.({ runId, requestId: String(params.requestId), messages });

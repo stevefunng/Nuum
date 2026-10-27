@@ -68,7 +68,7 @@ export async function createHostServer(options: HostRuntimeOptions): Promise<Hos
       }
       case HostMethods.agentSend: {
         const params = AgentSendParams.parse(raw);
-        return runtime.send(params.id, params.content);
+        return runtime.send(params.id, params.content, { attachments: params.attachments });
       }
       case HostMethods.agentAnswerWidget: {
         const params = AgentAnswerWidgetParams.parse(raw);

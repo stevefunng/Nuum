@@ -1,3 +1,6 @@
+import { groupToolActivity } from "./activity-groups";
+import { readAttachmentFiles } from "./attachment-files";
+import { supportsImageInput, type AttachmentUpload, type ModelRef } from "@nuum/protocol";
 import { ExecutionApproval } from "./execution-approval";
 import { t } from "../i18n";
 import type { AgentView, ViewBlock } from "@nuum/protocol";
@@ -29,6 +32,11 @@ export interface ConversationWorkspaceProps {
   canCancelCreate?: boolean;
   creationError?: string | null;
   pendingTool?: PendingTool | null;
+  attachments?: readonly AttachmentUpload[];
+  sending?: boolean;
+  inputModel?: ModelRef;
+  onAttachmentsChange?(files: AttachmentUpload[]): void;
+  onOpenAttachment?(path: string): void;
   draft: string;
   onDraftChange(value: string): void;
   onSubmit(): void;
@@ -101,7 +109,16 @@ function AssistantBlock({ block }: { block: Extract<ViewBlock, { type: "assistan
             <span>{t("思考中")}</span>
           </div>
         ) : null}
-        {block.tools.map((tool) => <ToolActivity key={tool.id} tool={tool} />)}
+        {block.tools.length > 1 ? (
+          <details className="sand-tool-activity sand-tool-group" data-status={block.tools.some(tool => tool.status === "pending") ? "pending" : block.tools.some(tool => tool.status === "error") ? "error" : "ok"}>
+            <summary>
+              <span className="sand-tool-activity__pulse" />
+              <span>{t("{count} tool calls", { count: block.tools.length })} · {toolStatus(block.tools.some(tool => tool.status === "pending") ? "pending" : block.tools.some(tool => tool.status === "error") ? "error" : "ok")}</span>
+              <span className="sand-tool-activity__chevron" />
+            </summary>
+            <div className="sand-tool-group__items">{block.tools.map((tool, index) => <ToolActivity key={`${tool.id}-${index}`} tool={tool} />)}</div>
+          </details>
+        ) : block.tools.map((tool) => <ToolActivity key={tool.id} tool={tool} />)}
       </div>
     </article>
   );
@@ -428,7 +445,7 @@ function AgentCreation({
 export function ConversationWorkspace({
   agent,
   agents = [],
-  blocks,
+  blocks: rawBlocks,
   blockTimestamps = {},
   autoFocusInput = false,
   creatingAgent = false,
@@ -436,6 +453,11 @@ export function ConversationWorkspace({
   creationError,
   pendingTool,
   draft,
+  attachments = [],
+  sending = false,
+  inputModel,
+  onAttachmentsChange,
+  onOpenAttachment,
   onDraftChange,
   onSubmit,
   onCancel,
@@ -446,6 +468,39 @@ export function ConversationWorkspace({
   onOpenProfile,
   notice
 }: ConversationWorkspaceProps) {
+  const blocks = groupToolActivity(rawBlocks);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [readingFiles, setReadingFiles] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const menuRoot = useRef<HTMLDivElement>(null);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  const menuItem = useRef<HTMLButtonElement>(null);
+  const selectedAgentId = useRef(agent?.profile.id);
+  selectedAgentId.current = agent?.profile.id;
+  const canSend = !sending && !readingFiles && Boolean(draft.trim() || attachments.length);
+  useEffect(() => { setMenuOpen(false); setAttachmentError(null); }, [agent?.profile.id]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    menuItem.current?.focus();
+    const outside = (event: PointerEvent) => { if (!menuRoot.current?.contains(event.target as Node)) setMenuOpen(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") { setMenuOpen(false); menuButton.current?.focus(); } };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("pointerdown", outside); document.removeEventListener("keydown", escape); };
+  }, [menuOpen]);
+  async function addFiles(files: File[]) {
+    if (!onAttachmentsChange || sending || readingFiles || !agent) return;
+    const id = agent.profile.id;
+    setReadingFiles(true);
+    setAttachmentError(null);
+    try {
+      const added = await readAttachmentFiles(files, attachments);
+      if (selectedAgentId.current === id) onAttachmentsChange([...attachments, ...added]);
+    } catch (error) { if (selectedAgentId.current === id) setAttachmentError(error instanceof Error ? error.message : String(error)); }
+    finally { setReadingFiles(false); }
+  }
+  const submit = () => { if (canSend && agent?.runtime.status !== "running") onSubmit(); };
   const empty = agent == null || blocks.length === 0;
   // 提问卡片的已回答状态：user 块的 widgetAnswerTo 指回被回答的 message 块。
   const widgetAnswers = new Map(
@@ -527,7 +582,8 @@ export function ConversationWorkspace({
             <article className="sand-transcript-row">
               <div className="sand-message sand-message--user">
                 <div className="sand-message-prose">
-                  <p>{block.text}</p>
+                  {block.text ? <p>{block.text}</p> : null}
+                  {block.attachments?.length ? <div className="sand-user-attachments">{block.attachments.map(file => <button key={file.path} type="button" onClick={() => onOpenAttachment?.(file.path)} title={file.path}><SandIcon name="attach" size={16} /><span>{file.name}</span></button>)}</div> : null}
                 </div>
               </div>
             </article>
@@ -568,12 +624,24 @@ export function ConversationWorkspace({
           className="sand-prompt-form"
           onSubmit={(event: FormEvent) => {
             event.preventDefault();
-            onSubmit();
+            submit();
           }}
         >
-          <div className="sand-prompt-shell">
+          <input ref={fileInput} type="file" multiple className="sand-prompt-file-input" tabIndex={-1} onChange={event => { void addFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
+          {attachments.length ? <div className="sand-prompt-attachments" aria-label={t("Attachments")}>
+            {attachments.map((file, index) => <div className="sand-prompt-attachment" key={`${index}-${file.name}`}>
+              {file.mimeType.startsWith("image/") ? <img src={`data:${file.mimeType};base64,${file.data}`} alt={file.name} /> : <SandIcon name="attach" size={18} />}
+              <span><strong>{file.name}</strong><small>{Math.max(1, Math.ceil(file.data.length * 3 / 4 / 1024))} KB</small></span>
+              <button type="button" disabled={sending || readingFiles} aria-label={t("Remove {name}", { name: file.name })} onClick={() => onAttachmentsChange?.(attachments.filter((_, itemIndex) => itemIndex !== index))}><SandIcon name="close" size={14} /></button>
+            </div>)}
+          </div> : null}
+          {attachmentError ? <div className="sand-prompt-attachment-notice" role="alert">{t(attachmentError)}</div> : null}
+          {readingFiles ? <div className="sand-prompt-attachment-notice" role="status">{t("Reading attachments…")}</div> : null}
+          {attachments.some(file => file.mimeType.startsWith("image/")) && agent && !supportsImageInput(inputModel ?? agent.settings.model) ? <div className="sand-prompt-attachment-notice" role="status">{t("This model has no confirmed image input support. Images will be saved as files for tools; use a vision model to view them.")}</div> : null}
+          <div className="sand-prompt-shell" onDragOver={event => { if (onAttachmentsChange) event.preventDefault(); }} onDrop={event => { event.preventDefault(); void addFiles(Array.from(event.dataTransfer.files)); }}>
             <textarea
               className="sand-prompt-field"
+              disabled={sending}
               rows={1}
               ref={promptRef}
               onChange={(event) => onDraftChange(event.target.value)}
@@ -590,22 +658,27 @@ export function ConversationWorkspace({
                   const nativeEvent = event.nativeEvent;
                   if (composingRef.current || nativeEvent.isComposing || nativeEvent.keyCode === 229) return;
                   event.preventDefault();
-                  onSubmit();
+                  submit();
                 }
               }}
               placeholder={agent ? t("Message {name}", { name: agent.profile.name }) : t("Ask anything, or drop a file.")}
               value={draft}
             />
             <div className="sand-prompt-actions-row">
-              <button className="sand-prompt-attach" disabled type="button" aria-label={t("Attach file")}>
-                <SandIcon name="attach" size={16} />
-              </button>
+              <div className="sand-prompt-menu-anchor" ref={menuRoot} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setMenuOpen(false); }}>
+                <button ref={menuButton} className="sand-prompt-attach" disabled={!agent || !onAttachmentsChange || sending || readingFiles} type="button" aria-label={t("Composer actions")} aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)} onKeyDown={event => { if (event.key === "ArrowUp" || event.key === "ArrowDown") { event.preventDefault(); setMenuOpen(true); } }}>
+                  <SandIcon name="plus" size={20} />
+                </button>
+                {menuOpen ? <div className="sand-prompt-menu" role="menu" aria-label={t("Composer actions")}>
+                  <button ref={menuItem} type="button" role="menuitem" onClick={() => { setMenuOpen(false); fileInput.current?.click(); menuButton.current?.focus(); }}><SandIcon name="attach" size={16} />{t("Add attachment")}</button>
+                </div> : null}
+              </div>
               {agent?.runtime.status === "running" ? (
                 <button className="sand-prompt-send" onClick={onCancel} type="button" aria-label={t("Stop")}>
                   <SandIcon name="stop" />
                 </button>
               ) : (
-                <button className="sand-prompt-send" disabled={!draft.trim()} type="submit" aria-label={t("Send message")}>
+                <button className="sand-prompt-send" disabled={!canSend} type="submit" aria-label={t("Send message")}>
                   <SandIcon name="arrow-up" size={16} />
                 </button>
               )}

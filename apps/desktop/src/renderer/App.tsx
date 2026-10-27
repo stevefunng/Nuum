@@ -6,6 +6,8 @@ import {
   DEFAULT_MODEL_ID,
   appendAssistantDelta,
   projectAgent,
+  resolveAvailableModel,
+  type AttachmentUpload,
   type AgentSnapshot,
   type AgentView,
   type LiveAssistant,
@@ -58,9 +60,11 @@ type AgentPane = {
     justification?: string; allowAlways?: boolean; details?: string;
   } | null;
   draft: string;
+  attachments: AttachmentUpload[];
+  sending?: boolean;
 };
 
-const emptyPane: AgentPane = { events: [], live: null, notice: null, pendingTool: null, draft: "" };
+const emptyPane: AgentPane = { events: [], live: null, notice: null, pendingTool: null, draft: "", attachments: [] };
 
 /**
  * Host 通知与 agent.get 快照可能交错到达。JSONL 的 seq 才是顺序真值；
@@ -143,6 +147,11 @@ export function App() {
   );
   const pane = (activeId ? panes[activeId] : undefined) ?? emptyPane;
   const draft = activeId ? pane.draft : "";
+  const inputModel = resolveAvailableModel({
+    openaiApiKey: settings?.hasOpenaiKey ? "available" : undefined,
+    anthropicApiKey: settings?.hasAnthropicKey ? "available" : undefined,
+    deepseekApiKey: settings?.hasDeepseekKey ? "available" : undefined
+  }, active?.settings.model) ?? active?.settings.model;
   const blocks = projectAgent(pane.events, pane.live).blocks;
   const blockTimestamps = transcriptTimestamps(pane.events);
 
@@ -388,14 +397,15 @@ export function App() {
 
   async function sendAgent(id: string): Promise<void> {
     const targetPane = panes[id] ?? emptyPane;
-    if (!targetPane.draft.trim()) return;
+    if (targetPane.sending || (!targetPane.draft.trim() && !targetPane.attachments.length)) return;
     const content = targetPane.draft;
     try {
-      patchPane(id, { draft: "", notice: null });
-      await window.nuum.host.request(HostMethods.agentSend, { id, content });
+      patchPane(id, { sending: true, notice: null });
+      await window.nuum.host.request(HostMethods.agentSend, { id, content, attachments: targetPane.attachments });
+      patchPane(id, { draft: "", attachments: [], sending: false });
     } catch (error) {
       if (id) {
-        patchPane(id, { notice: error instanceof Error ? error.message : String(error) });
+        patchPane(id, { sending: false, notice: error instanceof Error ? error.message : String(error) });
       }
     }
   }
@@ -603,6 +613,11 @@ export function App() {
             creationError={creationError}
             pendingTool={pane.pendingTool?.workId ? null : pane.pendingTool}
             draft={draft}
+            attachments={pane.attachments}
+            sending={pane.sending}
+            inputModel={inputModel}
+            onAttachmentsChange={files => { if (activeId) patchPane(activeId, { attachments: files }); }}
+            onOpenAttachment={file => { void window.nuum.desktop.openPath(file); }}
             notice={pane.notice}
             onDraftChange={(value) => {
               if (activeId) patchPane(activeId, { draft: value });
