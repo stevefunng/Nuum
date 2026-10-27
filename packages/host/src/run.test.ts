@@ -1,5 +1,6 @@
+import { testTempDir } from "../../../scripts/test-temp.mjs";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
@@ -126,7 +127,7 @@ async function reopenHarness(t: TestContext, previous: Harness): Promise<Harness
 
 async function openHarness(t: TestContext, options: HarnessOptions = {}): Promise<Harness> {
   const { dataDir: reuse, ...runtimeOptions } = options;
-  const dataDir = reuse ?? (await mkdtemp(path.join(tmpdir(), "nuum-run-")));
+  const dataDir = reuse ?? (await testTempDir(path.join(tmpdir(), "nuum-run-")));
   const kernel = new FakeKernel();
   const events: { method: string; params: any }[] = [];
   const runtime = new HostRuntime({

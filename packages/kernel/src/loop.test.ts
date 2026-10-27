@@ -1,5 +1,6 @@
+import { testTempDir } from "../../../scripts/test-temp.mjs";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -222,7 +223,7 @@ test("shell_id inspection is a pre-approved read of this agent's terminal file",
 });
 
 test("turn cancellation disposes the agent's persistent shell", async (t) => {
-  const home = await mkdtemp(path.join(tmpdir(), "nuum-kernel-shell-"));
+  const home = await testTempDir(path.join(tmpdir(), "nuum-kernel-shell-"));
   const project = path.join(home, "project");
   const agent = path.join(home, "agents", "a1");
   const scratch = path.join(agent, "scratch");

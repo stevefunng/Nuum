@@ -1,12 +1,13 @@
+import { testTempDir } from "../../../scripts/test-temp.mjs";
 import assert from "node:assert/strict";
-import { appendFile, mkdtemp, readFile } from "node:fs/promises";
+import { appendFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { WorkStore, projectWork } from "./work-store.js";
 
 async function openStore() {
-  const dataDir = await mkdtemp(path.join(tmpdir(), "nuum-work-store-"));
+  const dataDir = await testTempDir(path.join(tmpdir(), "nuum-work-store-"));
   const store = new WorkStore(dataDir);
   await store.init();
   return { dataDir, store };

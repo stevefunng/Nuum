@@ -1,12 +1,13 @@
+import { testTempDir } from "../../../scripts/test-temp.mjs";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, realpath } from "node:fs/promises";
+import { mkdir, readFile, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
 import { createSandbox, disposeAllShells } from "./index.js";
 
 async function fixture(t: TestContext) {
-  const home = await mkdtemp(path.join(tmpdir(), "nuum-shell-"));
+  const home = await testTempDir(path.join(tmpdir(), "nuum-shell-"));
   const projectPath = path.join(home, "project");
   const agent = path.join(home, "data", "agents", "a1");
   const scratch = path.join(agent, "scratch");

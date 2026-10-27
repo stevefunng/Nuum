@@ -1,5 +1,6 @@
+import { testTempDir } from "../../../scripts/test-temp.mjs";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
@@ -22,7 +23,7 @@ async function openRuntime(t: TestContext, dataDir: string): Promise<HostRuntime
 }
 
 test("a fresh agent has no persisted runtime state at all", async (t) => {
-  const dir = await mkdtemp(path.join(tmpdir(), "nuum-runtime-"));
+  const dir = await testTempDir(path.join(tmpdir(), "nuum-runtime-"));
   const runtime = await openRuntime(t, dir);
   const created = await runtime.createAgent({ name: "Scout" });
 
@@ -43,7 +44,7 @@ test("a fresh agent has no persisted runtime state at all", async (t) => {
 });
 
 test("runtime status comes back idle after a restart", async (t) => {
-  const dir = await mkdtemp(path.join(tmpdir(), "nuum-runtime-"));
+  const dir = await testTempDir(path.join(tmpdir(), "nuum-runtime-"));
   const first = await openRuntime(t, dir);
   const created = await first.createAgent({ name: "Scout" });
   // 模拟一个回合进行中就崩掉的进程：内存里 busy，磁盘上什么都没留。
@@ -62,7 +63,7 @@ test("runtime status comes back idle after a restart", async (t) => {
 });
 
 test("unknown agents are rejected on every id-taking call", async (t) => {
-  const dir = await mkdtemp(path.join(tmpdir(), "nuum-runtime-"));
+  const dir = await testTempDir(path.join(tmpdir(), "nuum-runtime-"));
   const runtime = await openRuntime(t, dir);
   await assert.rejects(() => runtime.getAgent("nope"), /Agent not found/);
   await assert.rejects(() => runtime.getTranscript("nope"), /Agent not found/);
@@ -71,7 +72,7 @@ test("unknown agents are rejected on every id-taking call", async (t) => {
 });
 
 test("opening an agent clears unread and projects its transcript", async (t) => {
-  const dir = await mkdtemp(path.join(tmpdir(), "nuum-runtime-"));
+  const dir = await testTempDir(path.join(tmpdir(), "nuum-runtime-"));
   const runtime = await openRuntime(t, dir);
   const created = await runtime.createAgent({ name: "Scout" });
   const id = created.profile.id;
@@ -95,7 +96,7 @@ test("opening an agent clears unread and projects its transcript", async (t) => 
 });
 
 test("opening an agent never writes model-only tool repairs into the transcript truth", async (t) => {
-  const dir = await mkdtemp(path.join(tmpdir(), "nuum-runtime-"));
+  const dir = await testTempDir(path.join(tmpdir(), "nuum-runtime-"));
   const runtime = await openRuntime(t, dir);
   const id = (await runtime.createAgent({ name: "Scout" })).profile.id;
   await runtime.store.appendEvent(id, {
@@ -111,7 +112,7 @@ test("opening an agent never writes model-only tool repairs into the transcript 
 });
 
 test("update merges the given fields and leaves the rest alone", async (t) => {
-  const dir = await mkdtemp(path.join(tmpdir(), "nuum-runtime-"));
+  const dir = await testTempDir(path.join(tmpdir(), "nuum-runtime-"));
   const runtime = await openRuntime(t, dir);
   const created = await runtime.createAgent({ name: "Scout", description: "scans things" });
   const renamed = await runtime.updateAgent({ id: created.profile.id, name: "Ranger" });
@@ -125,7 +126,7 @@ test("update merges the given fields and leaves the rest alone", async (t) => {
 });
 
 test("delete removes the agent directory and drops it from the list", async (t) => {
-  const dir = await mkdtemp(path.join(tmpdir(), "nuum-runtime-"));
+  const dir = await testTempDir(path.join(tmpdir(), "nuum-runtime-"));
   const runtime = await openRuntime(t, dir);
   const created = await runtime.createAgent({ name: "Scout" });
   await runtime.deleteAgent(created.profile.id);
@@ -134,7 +135,7 @@ test("delete removes the agent directory and drops it from the list", async (t) 
 });
 
 test("sidebar organization survives restart and does not change Agent or Work identity", async (t) => {
-  const dir = await mkdtemp(path.join(tmpdir(), "nuum-sidebar-"));
+  const dir = await testTempDir(path.join(tmpdir(), "nuum-sidebar-"));
   const runtime = await openRuntime(t, dir);
   const agent = await runtime.createAgent({ name: "Researcher" });
   const sidebar = { pinnedAgentIds: [agent.profile.id], sections: [{ id: "research", name: "Research", agentIds: [agent.profile.id], isCollapsed: true }] };
@@ -152,7 +153,7 @@ test("sidebar organization survives restart and does not change Agent or Work id
 });
 
 test("profile edits share one persisted identity with UI events and model context", async (t) => {
-  const dir = await mkdtemp(path.join(tmpdir(), "nuum-profile-"));
+  const dir = await testTempDir(path.join(tmpdir(), "nuum-profile-"));
   const runtime = await openRuntime(t, dir);
   const created = await runtime.createAgent({ name: "Scout", avatarColor: "green" });
   const id = created.profile.id;
@@ -181,7 +182,7 @@ test("profile edits share one persisted identity with UI events and model contex
 });
 
 test("interface language survives restart without replacing other preferences", async (t) => {
-  const dir = await mkdtemp(path.join(tmpdir(), "nuum-language-"));
+  const dir = await testTempDir(path.join(tmpdir(), "nuum-language-"));
   const runtime = await openRuntime(t, dir);
   const { SettingsSetParams } = await import("@nuum/protocol");
   await runtime.setSettings({ theme: "light" });

@@ -12,13 +12,13 @@ apps/desktop/release
 .artifacts
 *.tsbuildinfo
 
-# Local research, handoff, and architecture working notes.
-# These files may contain implementation history that is not part of the public project.
+# Local documentation, research, and working notes.
+/AGENTS.md
+/docs/*
+!/docs/assets/
+/docs/assets/*
+!/docs/assets/nuum-banner.png
 /design-qa.md
-/docs/architecture-agent-first.md
-/docs/architecture-proactive-workbar.md
-/docs/handoff-agent-first.md
-/docs/handoff-bot-infra.md
 
 # ZCode workspace data (session plans, tool state)
 .zcode/

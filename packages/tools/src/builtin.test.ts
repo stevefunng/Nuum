@@ -1,5 +1,6 @@
+import { testTempDir } from "../../../scripts/test-temp.mjs";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
@@ -19,7 +20,7 @@ import {
 import type { Tool } from "./types.js";
 
 async function fixture(t: TestContext) {
-  const home = await mkdtemp(path.join(tmpdir(), "nuum-tools-"));
+  const home = await testTempDir(path.join(tmpdir(), "nuum-tools-"));
   const project = path.join(home, "project");
   const scratch = path.join(home, "data", "agents", "a1", "scratch");
   await Promise.all([mkdir(project, { recursive: true }), mkdir(scratch, { recursive: true })]);

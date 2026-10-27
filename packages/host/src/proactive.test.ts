@@ -1,5 +1,5 @@
+import { testTempDir } from "../../../scripts/test-temp.mjs";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -7,11 +7,12 @@ import { AgentStore } from "./agent-store.js";
 import { ProactiveService } from "./proactive.js";
 
 async function fixture(t: { after(fn: () => Promise<void>): void }) {
-  const dir = await mkdtemp(path.join(tmpdir(), "nuum-proactive-"));
-  const store = new AgentStore(dir); await store.init();
+  const dir = await testTempDir(path.join(tmpdir(), "nuum-proactive-"));
+  const store = new AgentStore(dir);
   let now = 1_000_000;
   const service = new ProactiveService(store, () => ({ provider: "deepseek", model: "deepseek-chat" }), () => undefined, () => now);
   t.after(async () => { await service.dispose(); await store.dispose(); });
+  await store.init();
   return { store, service, advance: (ms: number) => { now += ms; } };
 }
 
@@ -72,9 +73,10 @@ test("policy and recent activity survive a fresh store reload", async (t) => {
   const id = enabled.defaultAgentId!;
   await service.configure({ agentId: id, expectedRevision: 1, pausedUntil: 2_000_000 });
   await service.dispose(); await store.dispose();
-  const reopenedStore = new AgentStore(store.dataDir); await reopenedStore.init();
+  const reopenedStore = new AgentStore(store.dataDir);
   const reopened = new ProactiveService(reopenedStore, () => ({ provider: "deepseek", model: "deepseek-chat" }), () => undefined, () => 1_000_000);
   t.after(async () => { await reopened.dispose(); await reopenedStore.dispose(); });
+  await reopenedStore.init();
   const restored = await reopened.snapshot();
   assert.equal(restored.defaultAgentId, id);
   assert.equal(restored.agents[0]!.state, "paused");

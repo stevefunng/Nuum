@@ -1,12 +1,13 @@
+import { testTempDir } from "../../../scripts/test-temp.mjs";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
+import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { createSandbox } from "./create-sandbox.js";
 
 async function fixture(permission: "always" | "ask" | "never" = "ask") {
-  const home = await mkdtemp(path.join(tmpdir(), "nuum-sandbox-home-"));
+  const home = await testTempDir(path.join(tmpdir(), "nuum-sandbox-home-"));
   const data = path.join(home, ".nuum");
   const agent = path.join(data, "agents", "a1");
   const scratch = path.join(agent, "scratch");
@@ -22,7 +23,7 @@ async function fixture(permission: "always" | "ask" | "never" = "ask") {
 
 test("a symlink cannot escape the hard local execution root", async () => {
   const item = await fixture("always");
-  const outside = await mkdtemp(path.join(tmpdir(), "nuum-sandbox-outside-"));
+  const outside = await testTempDir(path.join(tmpdir(), "nuum-sandbox-outside-"));
   await symlink(outside, path.join(item.project, "escape"));
   const verdict = await item.sandbox.authorize("write-file", path.join(item.project, "escape", "x.txt"));
   assert.equal(verdict.decision, "deny");
@@ -38,7 +39,7 @@ test("host secrets are denied even with always permission", async () => {
 
 test("a normal path outside the hard root is denied", async () => {
   const item = await fixture("always");
-  const outside = await mkdtemp(path.join(tmpdir(), "nuum-outside-"));
+  const outside = await testTempDir(path.join(tmpdir(), "nuum-outside-"));
   assert.equal((await item.sandbox.authorize("read-file", path.join(outside, "x"))).decision, "deny");
 });
 

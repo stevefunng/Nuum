@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, readdir, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, utimes, writeFile } from "node:fs/promises";
+import { testTempDir } from "../../../scripts/test-temp.mjs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
@@ -21,7 +22,7 @@ async function openStore(t: TestContext, dir: string): Promise<AgentStore> {
 }
 
 async function freshStore(t: TestContext): Promise<{ store: AgentStore; dir: string }> {
-  const dir = await mkdtemp(path.join(tmpdir(), "nuum-agents-"));
+  const dir = await testTempDir(path.join(tmpdir(), "nuum-agents-"));
   return { store: await openStore(t, dir), dir };
 }
 
@@ -231,7 +232,7 @@ test("a second host on the same dataDir is refused instead of double-writing", a
 });
 
 test("migration converts legacy sessions and is idempotent", async (t) => {
-  const dir = await mkdtemp(path.join(tmpdir(), "nuum-migrate-"));
+  const dir = await testTempDir(path.join(tmpdir(), "nuum-migrate-"));
   await seedLegacySession(
     dir,
     "s1",

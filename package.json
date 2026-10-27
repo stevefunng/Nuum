@@ -13,7 +13,7 @@
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "lint:deps": "depcruise apps packages --config dependency-cruiser.cjs",
-    "test": "turbo run build --filter=@nuum/executor && turbo run test && turbo run build --filter=@nuum/host --filter=@nuum/kernel --filter=@nuum/executor && node scripts/smoke-host.mjs"
+    "test": "node --test scripts/test-temp.test.mjs && turbo run build --filter=@nuum/executor && turbo run test && turbo run build --filter=@nuum/host --filter=@nuum/kernel --filter=@nuum/executor && node scripts/smoke-host.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

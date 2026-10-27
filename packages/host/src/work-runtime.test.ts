@@ -1,5 +1,5 @@
+import { testTempDir } from "../../../scripts/test-temp.mjs";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
@@ -22,13 +22,13 @@ const quietKernel: KernelClient = {
 
 async function runtime(t: TestContext, kernel: KernelClient = quietKernel): Promise<HostRuntime> {
   const instance = new HostRuntime({
-    dataDir: await mkdtemp(path.join(tmpdir(), "nuum-work-runtime-")),
+    dataDir: await testTempDir(path.join(tmpdir(), "nuum-work-runtime-")),
     kernelCommand: "unused",
     kernelArgs: [],
     spawnKernel: () => kernel
   });
-  await instance.start();
   t.after(() => instance.dispose());
+  await instance.start();
   return instance;
 }
 
@@ -403,8 +403,8 @@ async function revive(t: TestContext, original: HostRuntime, starts: import("@nu
   await original.dispose();
   const host = new HostRuntime({ dataDir: original.store.dataDir, kernelCommand: "unused", kernelArgs: [], spawnKernel: () => ({ ...quietKernel, start: async params => { starts.push(params); return { ok: true }; } }) });
   host.store.secrets.deepseekApiKey = "test-key";
-  await host.start();
   t.after(() => host.dispose());
+  await host.start();
   return host;
 }
 

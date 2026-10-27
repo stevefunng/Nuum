@@ -1,12 +1,13 @@
+import { testTempDir } from "../../../scripts/test-temp.mjs";
 import assert from "node:assert/strict";
-import { mkdtemp, appendFile } from "node:fs/promises";
+import { appendFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { SessionStore } from "./session-store.js";
 
 test("card participants resume separate durable histories and idempotent inputs", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "nuum-sessions-"));
+  const dir = await testTempDir(path.join(tmpdir(), "nuum-sessions-"));
   const store = new SessionStore(dir);
   const a = await store.ensure("room", "card", "a", 1);
   const b = await store.ensure("room", "card", "b", 1);
@@ -22,7 +23,7 @@ test("card participants resume separate durable histories and idempotent inputs"
 });
 
 test("session append repairs a torn final line without losing committed entries", async () => {
-  const store = new SessionStore(await mkdtemp(path.join(tmpdir(), "nuum-sessions-")));
+  const store = new SessionStore(await testTempDir(path.join(tmpdir(), "nuum-sessions-")));
   const session = await store.ensure("room", "card", "a", 0);
   await store.append(session, { type: "user", id: "first", text: "First", createdAt: 1 });
   await appendFile(store.transcriptFile(session), '{"type":"assistant"');

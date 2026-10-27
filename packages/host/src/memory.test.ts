@@ -1,5 +1,6 @@
+import { testTempDir } from "../../../scripts/test-temp.mjs";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -16,7 +17,7 @@ import {
 } from "./memory.js";
 
 async function freshStore(): Promise<MemoryStore> {
-  return new MemoryStore(path.join(await mkdtemp(path.join(tmpdir(), "nuum-mem-")), "memory"));
+  return new MemoryStore(path.join(await testTempDir(path.join(tmpdir(), "nuum-mem-")), "memory"));
 }
 
 test("a standing fact and a dated fact land in different files", async () => {

@@ -1,3 +1,4 @@
+import { cleanupTestExecutor } from "../../../scripts/test-executor.mjs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
@@ -49,7 +50,7 @@ test("daemon authenticates contexts, adopts active work after supervisor detache
     await assert.rejects(executionRpc(other, "status", { id: request.id }), /not authorized/);
     await client.rpc("revoke", { contextId: context.id });
     await assert.rejects(executionRpc(endpoint, "submit", { ...request, id: "new" }), /not authorized/);
-  } finally { await client.stop(); await rm(base, { recursive: true, force: true }); }
+  } finally { await client.stop(); await cleanupTestExecutor(base); await rm(base, { recursive: true, force: true }); }
 });
 
 test("Host persists a workspace-scoped network grant and revocation invalidates old execution authority", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
@@ -86,7 +87,7 @@ test("Host persists a workspace-scoped network grant and revocation invalidates 
     await assert.rejects(executionRpc(endpoint, "submit", { ...request, id: "new" }), /not authorized/);
     const saved = JSON.parse(await readFile(path.join(base, "agents", agent.profile.id, "settings.json"), "utf8"));
     assert.deepEqual(saved.execution.networkGrants, []);
-  } finally { await host.dispose(); await rm(base, { recursive: true, force: true }); }
+  } finally { await host.dispose(); await cleanupTestExecutor(host.store.dataDir); await rm(base, { recursive: true, force: true }); }
 });
 
 test("daemon crash cleans its shell group, restarts with a new identity and does not replay work", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
@@ -119,7 +120,7 @@ test("daemon crash cleans its shell group, restarts with a new identity and does
     assert.throws(() => process.kill(childPid, 0), { code: "ESRCH" });
     await assert.rejects(executionRpc(endpoint, "status", { id: "crash-command" }), /generation changed/);
     assert.equal(await readFile(path.join(root, "count.txt"), "utf8"), "once\n");
-  } finally { await client.stop(); await rm(base, { recursive: true, force: true }); }
+  } finally { await client.stop(); await cleanupTestExecutor(base); await rm(base, { recursive: true, force: true }); }
 });
 
 test("Host adoption recovers finished output to its original transcript and stops stale authorization", { skip: process.platform !== "darwin", timeout: 40_000 }, async () => {
@@ -169,7 +170,7 @@ test("Host adoption recovers finished output to its original transcript and stop
     assert.ok(!transcript.includes("card-only-output"), "Card result must not leak into the private session");
     await assert.rejects(readFile(path.join(context.root, "stale.txt")), { code: "ENOENT" });
     await assert.rejects(executionRpc(stale, "submit", { id: "stale-run:new", contextId: "stale", name: "shell", input: { command: "echo no" } }), /not authorized/);
-  } finally { if (host) await host.dispose(); else await client.stop(); await rm(base, { recursive: true, force: true }); }
+  } finally { if (host) await host.dispose(); else await client.stop(); await cleanupTestExecutor(base); await rm(base, { recursive: true, force: true }); }
 });
 
 test("Host persists external permission per Nunu and revokes the live execution authority", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
@@ -210,5 +211,5 @@ test("Host persists external permission per Nunu and revokes the live execution 
     await assert.rejects(executionRpc(endpoint, "submit", { ...request, id: "new" }), /not authorized/);
     const saved = JSON.parse(await readFile(path.join(base, "private", "agents", agent.profile.id, "settings.json"), "utf8"));
     assert.deepEqual(saved.execution.externalGrants, []);
-  } finally { await host.dispose(); await rm(base, { recursive: true, force: true }); }
+  } finally { await host.dispose(); await cleanupTestExecutor(host.store.dataDir); await rm(base, { recursive: true, force: true }); }
 });

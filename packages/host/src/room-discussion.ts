@@ -1,4 +1,4 @@
-/** Local Grokbot policy: three rotating rounds, ten public messages, two per turn. */
+/** Room discussion policy: three rotating rounds, ten public messages, two per turn. */
 export const discussionLimits = { rounds: 3, messages: 10, perTurn: 2 } as const;
 export function isPass(text: string): boolean { return !text.trim() || /^\(?\s*pass\s*\)?\.?$/i.test(text.trim()); }
 export function orderSpeakers<T>(members: readonly T[], round: number): T[] {

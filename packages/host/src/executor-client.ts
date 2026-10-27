@@ -59,7 +59,7 @@ export class ExecutorClient {
     await this.waitAbsent(owned);
     this.endpoint = undefined;
   }
-  /** Supervision disposal deliberately does not terminate the daemon (Grokbot adoption semantics). */
+  /** Supervision disposal leaves the daemon running so a new Host can adopt it. */
   detach(): void { this.stopped = true; clearInterval(this.timer); this.child?.unref(); }
   private supervise() {
     this.timer = setInterval(() => {

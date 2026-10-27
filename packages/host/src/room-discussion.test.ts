@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { discussionResponders, orderSpeakers, isPass, discussionLimits } from "./room-discussion.js";
 const members = [{ id: "a", name: "Alice Smith" }, { id: "b", name: "Bob" }];
-test("Grokbot-style mentions accumulate since the latest user message", () => {
+test("mentions accumulate since the latest user message", () => {
   assert.deepEqual(discussionResponders(members, [{ body: "hello", mentionedAgentIds: [] }]).map(x => x.id), ["a", "b"]);
   assert.deepEqual(discussionResponders(members, [{ body: "@Alice hello", mentionedAgentIds: [] }, { body: "@Bob check", mentionedAgentIds: [] }]).map(x => x.id), ["a", "b"]);
   assert.deepEqual(discussionResponders(members, [{ body: "@BOB check", mentionedAgentIds: [] }]).map(x => x.id), ["b"]);
