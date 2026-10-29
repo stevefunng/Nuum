@@ -48,6 +48,7 @@ import com.nuum.protocol.DEFAULT_SETTINGS
 import com.nuum.protocol.Settings
 import com.nuum.protocol.WorkMembership
 import com.nuum.protocol.WorkProfile
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -145,6 +146,14 @@ class HostRuntime(
     internal val discussionJobs = LinkedHashMap<String, Job>()
     internal val errored = mutableSetOf<String>()
     internal val liveParts = LinkedHashMap<String, LiveBuffer>()
+
+    /**
+     * Pending local-tool approvals, keyed by agent and tool-call id.
+     * Filled from `turn.tool.pending` (action + canonical target), which is what
+     * Mac stores. Write arguments do not carry `action`, and the call is not in
+     * [liveParts] until after the user decides.
+     */
+    internal val pendingApprovals = ConcurrentHashMap<String, com.nuum.protocol.ToolApproval>()
     internal val pendingImages = LinkedHashMap<String, List<com.nuum.protocol.ModelImage>>()
     internal var settings: Settings = DEFAULT_SETTINGS
     internal var loaded = false

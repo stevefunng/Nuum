@@ -1,0 +1,4 @@
+414:[ 2120.980660] kernel BUG at arch/x86/kvm/x86.c:702!
+417:[ 2120.981950] RIP: 0010:kvm_spurious_fault+0xe/0x10
+432:[ 2120.987740]  vmx_vcpu_create+0xac/0x490
+453:[ 2120.995506] RIP: 0010:kvm_spurious_fault+0xe/0x10

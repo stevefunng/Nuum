@@ -1,0 +1,31 @@
+# :testing:acceptance:checkReleaseBudget — 2026-10-29
+
+Command: `./gradlew :testing:acceptance:checkReleaseBudget`
+APK: `android/app/build/outputs/apk/release/app-release-unsigned.apk`
+
+```
+Release APK app-release-unsigned.apk is 4159311 bytes (budget under 31457280)
+
+FAILURE: Native libraries in app-release-unsigned.apk:
+  lib/arm64-v8a/libandroidx.graphics.path.so
+  lib/arm64-v8a/libdatastore_shared_counter.so
+  lib/armeabi-v7a/libandroidx.graphics.path.so
+  lib/armeabi-v7a/libdatastore_shared_counter.so
+  lib/x86/libandroidx.graphics.path.so
+  lib/x86/libdatastore_shared_counter.so
+  lib/x86_64/libandroidx.graphics.path.so
+  lib/x86_64/libdatastore_shared_counter.so
+```
+
+Before R8 was enabled, the same unsigned release APK was 32300616 bytes (over the 31457280 budget) and contained the same eight `.so` files. Dex in that build was uncompressed and dominated the size.
+
+After `isMinifyEnabled` and `isShrinkResources` on the release build type, size is 4159311 bytes. A scan of `classes*.dex` did not contain `AcceptanceRouterModel` or `nuum.fakeModel`.
+
+Debug APK `app-debug.apk` was 41442288 bytes (under the 45 MB debug budget) and does contain `AcceptanceRouterModel`. It also contains the same eight `.so` files. Debug is not scenario 12.
+
+The `.so` files come from transitive AndroidX, not from an NDK module in this repo:
+
+- `libandroidx.graphics.path.so` — `androidx.graphics:graphics-path`, the pre-API 34 `PathIterator`. API 34+ uses the platform iterator. minSdk is 28, so removing it would break path iteration on older devices.
+- `libdatastore_shared_counter.so` — DataStore's multi-process counter. This app uses single-process `PreferenceDataStoreFactory` and does not call that counter, but the AAR still packages the library.
+
+They were left in the release APK. Stripping them to turn this check green would change runtime behavior on API 28–33.
