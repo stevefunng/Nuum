@@ -14,7 +14,7 @@ kvm_spurious_fault
 vmx_vcpu_create
 ```
 
-See `kvm-accel-on-dmesg.txt` and `emulator-accel-on.log`.
+See `kvm-accel-on-dmesg.txt` and `emulator-accel-on.txt`.
 `adb devices` stayed `emulator-5554 offline`. The process was killed.
 This matches ANDROID_ARCHITECTURE.md §15.3. Nested KVM advertises itself and then faults in `vmx_vcpu_create`.
 
