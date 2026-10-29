@@ -17,7 +17,8 @@
   "dependencies": {
     "@nuum/protocol": "workspace:*",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "three": "^0.186.1"
   },
   "peerDependencies": {
     "react": "^19.0.0",
@@ -26,6 +27,7 @@
   "devDependencies": {
     "@types/react": "^19.2.1",
     "@types/react-dom": "^19.2.1",
+    "@types/three": "^0.186.0",
     "typescript": "^5.9.2"
   }
 }

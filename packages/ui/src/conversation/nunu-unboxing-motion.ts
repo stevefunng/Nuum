@@ -1,42 +1,36 @@
-import { NUNU_REST, type NunuPose } from "./nunu-animation";
+import { NUNU_REST } from "./nunu-animation";
 
-export const UNBOX_DURATION = 3200;
+export const UNBOX_DURATION = 1500;
+export const CONFETTI_START = 1020;
+export const CONFETTI_DURATION = 3600;
+export const UNBOX_PLAYBACK_DURATION = CONFETTI_START + CONFETTI_DURATION;
+
+export function sampleUnboxingConfetti(time: number) {
+  const elapsed = time - CONFETTI_START;
+  return elapsed >= 0 && elapsed < CONFETTI_DURATION ? elapsed : null;
+}
+export const UNBOX_PACKAGES = ["soft-tray", "paper-fold", "round-box"] as const;
+export type UnboxingPackage = typeof UNBOX_PACKAGES[number];
+export function rollUnboxingPackage(random = Math.random): UnboxingPackage {
+  return UNBOX_PACKAGES[Math.min(2, Math.floor(random() * 3))]!;
+}
 export function smoothStep(start: number, end: number, time: number) {
   const x = Math.max(0, Math.min(1, (time - start) / (end - start)));
   return x * x * (3 - 2 * x);
 }
-
-// A push supplies the initial torque. The shell accelerates under gravity,
-// then loses energy at each floor contact. Angles never penetrate the floor.
-function shellAngle(time: number) {
-  if (time < 260) return .018 * Math.sin(Math.PI * Math.max(0, time) / 260);
-  if (time < 640) return .16 * smoothStep(260, 640, time);
-  if (time < 1280) {
-    const t = (time - 640) / 640;
-    return .16 + (Math.PI / 2 - .16) * (t * .24 + t * t * .76);
-  }
-  const t = (time - 1280) / 1000;
-  return Math.PI / 2 - .085 * Math.exp(-10 * t) * Math.abs(Math.sin(24 * t));
-}
-
 export function sampleUnboxing(time: number) {
-  const push = smoothStep(180, 560, time) * (1 - smoothStep(780, 1240, time));
-  const settle = smoothStep(1100, 1500, time);
-  const greeting = smoothStep(1520, 1770, time) * (1 - smoothStep(2170, 2490, time));
-  const pose: NunuPose = {
-    ...NUNU_REST,
-    leftArm: .75 * push,
-    rightArm: -.75 * push - greeting * (.65 + .16 * Math.sin(time / 90)),
-    head: -.035 * greeting,
-    bob: 20 * (1 - settle),
-    gazeY: -8 * push,
-    blink: .9 * smoothStep(1380, 1460, time) * (1 - smoothStep(1460, 1540, time)),
-    smile: .15 * greeting,
-  };
+  const t = Math.min(UNBOX_DURATION, Math.max(0, time));
+  const greeting = smoothStep(1020, 1140, t) * (1 - smoothStep(1280, 1480, t));
+  const approach = smoothStep(1020, 1400, t);
+  const leap = approach > 0 && approach < 1 ? Math.sin(Math.PI * approach) : 0;
   return {
-    left: shellAngle(time), right: shellAngle(time - 65), pose,
-    // All geometry is at rest before the editorial dissolve into the portrait.
-    packaging: 1 - smoothStep(2520, 3100, time),
-    zoom: .78 + .36 * smoothStep(2470, 3200, time),
+    approach,
+    jump: .18 * leap,
+    packaging: 1 - smoothStep(1080, 1300, t),
+    open: smoothStep(120, 680, t),
+    untie: smoothStep(40, 240, t),
+    reveal: smoothStep(700, 1020, t),
+    pose: { ...NUNU_REST, leftArm: .45 * leap, rightArm: -.55 * greeting - .45 * leap,
+      leftFoot: .14 * leap, rightFoot: -.14 * leap, head: -.025 * greeting - .025 * leap, smile: .12 * greeting },
   };
 }

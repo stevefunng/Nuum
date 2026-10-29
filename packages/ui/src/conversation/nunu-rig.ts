@@ -71,6 +71,7 @@ void main() {
 
 export interface NunuRig {
   resize(): void;
+  setPigment(pigment: number[]): void;
   draw(pose: NunuPose): void;
   dispose(): void;
 }
@@ -147,6 +148,9 @@ export function createNunuRig(canvas: HTMLCanvasElement, image: HTMLImageElement
   const face = gl.getUniformLocation(program, "u_face");
   const feet = gl.getUniformLocation(program, "u_feet");
   return {
+    setPigment(pigment) {
+      gl.uniform3fv(gl.getUniformLocation(program, "u_pigment"), pigment);
+    },
     resize() {
       const size = Math.max(1, Math.round(canvas.clientWidth * Math.max(2, window.devicePixelRatio || 1)));
       if (canvas.width !== size || canvas.height !== size) canvas.width = canvas.height = size;

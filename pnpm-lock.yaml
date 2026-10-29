@@ -136,6 +136,9 @@ importers:
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
+      three:
+        specifier: ^0.186.1
+        version: 0.186.1
     devDependencies:
       '@types/react':
         specifier: ^19.2.1
@@ -143,6 +146,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.2.1
         version: 19.2.5(@types/react@19.2.18)
+      '@types/three':
+        specifier: ^0.186.0
+        version: 0.186.0
       typescript:
         specifier: ^5.9.2
         version: 5.9.3
@@ -242,6 +248,9 @@ packages:
   '@babel/types@7.29.8':
     resolution: {integrity: sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg==}
     engines: {node: '>=6.9.0'}
+
+  '@dimforge/rapier3d-compat@0.12.0':
+    resolution: {integrity: sha512-uekIGetywIgopfD97oDL5PfeezkFpNhwlzlaEYNOA0N6ghdsOvh/HYjSMek5Q2O1PYvRSDFcqFVJl4r4ZBwOow==}
 
   '@electron/get@2.0.3':
     resolution: {integrity: sha512-Qkzpg2s9GnVV2I2BjRksUi43U5e6+zaQMcjoJy0C+C5oxaKl+fmckGDQFtRpZpZV0NQekuZZ+tGz7EA9TVnQtQ==}
@@ -764,6 +773,9 @@ packages:
     cpu: [arm64]
     os: [win32]
 
+  '@tweenjs/tween.js@23.1.3':
+    resolution: {integrity: sha512-vJmvvwFxYuGnF2axRtPYocag6Clbb5YS7kLL+SO/TeVFzHqDIWrNKYtcsPMibjDx9O+bu+psAy9NKfWklassUA==}
+
   '@types/babel__core@7.20.5':
     resolution: {integrity: sha512-qoQprZvz5wQFJwMDqeseRXWv3rqMvhgpbXFfVyWhbx9X47POIA6i/+dXefEmZKoAgOaTdaIgNSMqMIU61yRyzA==}
 
@@ -820,11 +832,20 @@ packages:
   '@types/responselike@1.0.3':
     resolution: {integrity: sha512-H/+L+UkTV33uf49PH5pCAUBVPNj2nDBXTN+qS1dOwyyg24l3CcicicCA7ca+HMvJBZcFgl5r8e+RR6elsb4Lyw==}
 
+  '@types/stats.js@0.17.4':
+    resolution: {integrity: sha512-jIBvWWShCvlBqBNIZt0KAshWpvSjhkwkEu4ZUcASoAvhmrgAUI2t1dXrjSL4xXVLB4FznPrIsX3nKXFl/Dt4vA==}
+
+  '@types/three@0.186.0':
+    resolution: {integrity: sha512-mxYSBpDC+D0pLfSP6sW4WZTcT+nrtmZcimMqnVmy36Hte3XpeYSrvgg4TRdaM1GemGog1AWzI5qL2VoIfMXbJQ==}
+
   '@types/unist@2.0.11':
     resolution: {integrity: sha512-CmBKiL6NNo/OqgmMn95Fk9Whlp2mtvIv+KNpQKN2F4SjvrEesubTRWGYSg+BnWZOnlCaSTU1sMpsBOzgbYhnsA==}
 
   '@types/unist@3.0.3':
     resolution: {integrity: sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q==}
+
+  '@types/webxr@0.5.24':
+    resolution: {integrity: sha512-h8fgEd/DpoS9CBrjEQXR+dIDraopAEfu4wYVNY2tEPwk60stPWhvZMf4Foo5FakuQ7HFZoa8WceaWFervK2Ovg==}
 
   '@types/yauzl@2.10.3':
     resolution: {integrity: sha512-oJoftv0LSuaDZE3Le4DbKX+KS9G36NzOeSap90UIK0yMA/NhKJhqlSGtNDORNRaIbQfzjXDrQa0ytJ6mNRGz/Q==}
@@ -1082,6 +1103,9 @@ packages:
       picomatch:
         optional: true
 
+  fflate@0.8.3:
+    resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
+
   fs-extra@8.1.0:
     resolution: {integrity: sha512-yhlQgA6mnOJUKOsRUFsgJdQCvkKhcz8tlZG5HBQfReYZy46OwLcY+Zia0mtdHsOo9y/hP+CxMN0TU9QxoOtG4g==}
     engines: {node: '>=6 <7 || >=8'}
@@ -1295,6 +1319,9 @@ packages:
   memoize@10.2.0:
     resolution: {integrity: sha512-DeC6b7QBrZsRs3Y02A6A7lQyzFbsQbqgjI6UW0GigGWV+u1s25TycMr0XHZE4cJce7rY/vyw2ctMQqfDkIhUEA==}
     engines: {node: '>=18'}
+
+  meshoptimizer@1.1.1:
+    resolution: {integrity: sha512-oRFNWJRDA/WTrVj7NWvqa5HqE1t9MYDj2VaWirQCzCCrAd2GHrqR/sQezCxiWATPNlKTcRaPRHPJwIRoPBAp5g==}
 
   micromark-core-commonmark@2.0.3:
     resolution: {integrity: sha512-RDBrHEMSxVFLg6xvnXmb1Ayr2WzLAWjeSATAoxwKYJV94TeNavgoIdA0a9ytzDSVzBy2YKFK+emCPOEibLeCrg==}
@@ -1594,6 +1621,9 @@ packages:
   teamcity-service-messages@0.1.14:
     resolution: {integrity: sha512-29aQwaHqm8RMX74u2o/h1KbMLP89FjNiMxD9wbF2BbWOnbM+q+d1sCEC+MqCc4QW3NJykn77OMpTFw/xTHIc0w==}
 
+  three@0.186.1:
+    resolution: {integrity: sha512-blFeqb49wRCSGUGj7gtpfnSGHy2lwDk94RhUmS1c/hTby70kvChbWpkJ4Pm1390LqzzvTmzgXKHPEafJwCb8jA==}
+
   tinyglobby@0.2.17:
     resolution: {integrity: sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g==}
     engines: {node: '>=12.0.0'}
@@ -1855,6 +1885,8 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
+
+  '@dimforge/rapier3d-compat@0.12.0': {}
 
   '@electron/get@2.0.3':
     dependencies:
@@ -2151,6 +2183,8 @@ snapshots:
   '@turbo/windows-arm64@2.10.12':
     optional: true
 
+  '@tweenjs/tween.js@23.1.3': {}
+
   '@types/babel__core@7.20.5':
     dependencies:
       '@babel/parser': 7.29.8
@@ -2225,9 +2259,22 @@ snapshots:
     dependencies:
       '@types/node': 24.13.3
 
+  '@types/stats.js@0.17.4': {}
+
+  '@types/three@0.186.0':
+    dependencies:
+      '@dimforge/rapier3d-compat': 0.12.0
+      '@tweenjs/tween.js': 23.1.3
+      '@types/stats.js': 0.17.4
+      '@types/webxr': 0.5.24
+      fflate: 0.8.3
+      meshoptimizer: 1.1.1
+
   '@types/unist@2.0.11': {}
 
   '@types/unist@3.0.3': {}
+
+  '@types/webxr@0.5.24': {}
 
   '@types/yauzl@2.10.3':
     dependencies:
@@ -2536,6 +2583,8 @@ snapshots:
   fdir@6.5.0(picomatch@4.0.7):
     optionalDependencies:
       picomatch: 4.0.7
+
+  fflate@0.8.3: {}
 
   fs-extra@8.1.0:
     dependencies:
@@ -2867,6 +2916,8 @@ snapshots:
   memoize@10.2.0:
     dependencies:
       mimic-function: 5.0.1
+
+  meshoptimizer@1.1.1: {}
 
   micromark-core-commonmark@2.0.3:
     dependencies:
@@ -3307,6 +3358,8 @@ snapshots:
   tapable@2.3.3: {}
 
   teamcity-service-messages@0.1.14: {}
+
+  three@0.186.1: {}
 
   tinyglobby@0.2.17:
     dependencies:
