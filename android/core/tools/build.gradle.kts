@@ -16,7 +16,7 @@ android {
 
 dependencies {
     implementation(project(":core:contracts"))
-    implementation(project(":core:protocol"))
     implementation(libs.androidx.documentfile)
     implementation(libs.kotlinx.coroutines.android)
+    testImplementation(libs.junit)
 }
