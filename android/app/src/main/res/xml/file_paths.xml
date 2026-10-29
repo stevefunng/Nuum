@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Workspace files and attachments under filesDir/nuum. secrets.bin is not in this tree. -->
+    <files-path name="nuum" path="nuum/" />
+</paths>
