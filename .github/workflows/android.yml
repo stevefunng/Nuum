@@ -18,6 +18,9 @@ concurrency:
 jobs:
   android:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
       - uses: actions/checkout@v4
 
@@ -26,12 +29,24 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - uses: android-actions/setup-android@v3
-
-      - name: Install SDK packages
+      # ubuntu-latest already has the Android SDK. Do not use
+      # android-actions/setup-android: it installs the removed package id "tools".
+      - name: Install Android SDK packages
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install "platforms;android-37.0" "build-tools;36.0.0" "platform-tools"
+          set -euo pipefail
+          if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          else
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort | tail -n 1)"
+          fi
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install \
+            "platform-tools" \
+            "platforms;android-36" \
+            "platforms;android-37.0" \
+            "build-tools;36.0.0" \
+            "build-tools;37.0.0"
 
       - uses: gradle/actions/setup-gradle@v4
 
