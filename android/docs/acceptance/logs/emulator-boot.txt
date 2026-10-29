@@ -1,0 +1,37 @@
+# Emulator attempt, 2026-10-29
+
+Host: Linux 6.12, `/dev/kvm` opened `O_RDWR` after `sudo chmod 666 /dev/kvm`.
+`emulator -accel-check` printed `KVM (version 12) is installed and usable.`
+AVD `nuum_api36`, system image `system-images;android-36;google_apis;x86_64`, emulator 37.2.13.
+
+## -accel on
+
+QEMU was started with `-enable-kvm`. The host kernel logged:
+
+```
+kernel BUG at arch/x86/kvm/x86.c:702!
+kvm_spurious_fault
+vmx_vcpu_create
+```
+
+See `kvm-accel-on-dmesg.txt` and `emulator-accel-on.log`.
+`adb devices` stayed `emulator-5554 offline`. The process was killed.
+This matches ANDROID_ARCHITECTURE.md §15.3. Nested KVM advertises itself and then faults in `vmx_vcpu_create`.
+
+## -accel off
+
+Same AVD, `-accel off -no-window -gpu off -no-snapshot`.
+
+After about 2.5 minutes:
+
+- `adb devices` → `emulator-5554 device`
+- `getprop init.svc.zygote` → `running`
+- `getprop ro.build.version.sdk` → `36`
+- `getprop sys.boot_completed` → empty
+- `getprop dev.bootcomplete` → empty
+- `getprop init.svc.package` → empty
+- `adb shell pm path android` → `Can't find service: package`
+
+Checked again at about 5 minutes (RSS ~3.8 GB). `sys.boot_completed` was still empty and the package service was still missing. The process was killed. No APK was installed. No instrumented test ran.
+
+Do not treat `adb devices` showing `device` as a booted emulator.

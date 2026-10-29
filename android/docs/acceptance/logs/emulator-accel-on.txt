@@ -1,0 +1,80 @@
+INFO         | 	 argv[54] = "-device"
+INFO         | 	 argv[55] = "virtconsole,chardev=forhvc0"
+INFO         | 	 argv[56] = "-device"
+INFO         | 	 argv[57] = "virtconsole,chardev=forhvc1"
+INFO         | 	 argv[58] = "-chardev"
+INFO         | 	 argv[59] = "netsim,id=uwb"
+INFO         | 	 argv[60] = "-device"
+INFO         | 	 argv[61] = "virtconsole,chardev=uwb,name=uwb"
+INFO         | 	 argv[62] = "-chardev"
+INFO         | 	 argv[63] = "netsim,id=bluetooth"
+INFO         | 	 argv[64] = "-device"
+INFO         | 	 argv[65] = "virtserialport,chardev=bluetooth,name=bluetooth"
+INFO         | 	 argv[66] = "-device"
+INFO         | 	 argv[67] = "virtio-serial,ioeventfd=off"
+INFO         | 	 argv[68] = "-chardev"
+INFO         | 	 argv[69] = "socket,port=38619,host=::1,nowait,nodelay,reconnect=10,ipv6,id=modem"
+INFO         | 	 argv[70] = "-device"
+INFO         | 	 argv[71] = "virtserialport,chardev=modem,name=modem"
+INFO         | 	 argv[72] = "-device"
+INFO         | 	 argv[73] = "virtio-rng-pci"
+INFO         | 	 argv[74] = "-show-cursor"
+INFO         | 	 argv[75] = "-device"
+INFO         | 	 argv[76] = "virtio_input_multi_touch_pci_1"
+INFO         | 	 argv[77] = "-device"
+INFO         | 	 argv[78] = "virtio_input_multi_touch_pci_2"
+INFO         | 	 argv[79] = "-device"
+INFO         | 	 argv[80] = "virtio_input_multi_touch_pci_3"
+INFO         | 	 argv[81] = "-device"
+INFO         | 	 argv[82] = "virtio_input_multi_touch_pci_4"
+INFO         | 	 argv[83] = "-device"
+INFO         | 	 argv[84] = "virtio_input_multi_touch_pci_5"
+INFO         | 	 argv[85] = "-device"
+INFO         | 	 argv[86] = "virtio_input_multi_touch_pci_6"
+INFO         | 	 argv[87] = "-device"
+INFO         | 	 argv[88] = "virtio_input_multi_touch_pci_7"
+INFO         | 	 argv[89] = "-device"
+INFO         | 	 argv[90] = "virtio_input_multi_touch_pci_8"
+INFO         | 	 argv[91] = "-device"
+INFO         | 	 argv[92] = "virtio_input_multi_touch_pci_9"
+INFO         | 	 argv[93] = "-device"
+INFO         | 	 argv[94] = "virtio_input_multi_touch_pci_10"
+INFO         | 	 argv[95] = "-device"
+INFO         | 	 argv[96] = "virtio_input_multi_touch_pci_11"
+INFO         | 	 argv[97] = "-netdev"
+INFO         | 	 argv[98] = "user,id=virtio-wifi,dhcpstart=10.0.2.16"
+INFO         | 	 argv[99] = "-device"
+INFO         | 	 argv[100] = "virtio-wifi-pci,netdev=virtio-wifi"
+INFO         | 	 argv[101] = "-device"
+INFO         | 	 argv[102] = "virtio-vsock-pci,guest-cid=77"
+INFO         | 	 argv[103] = "-L"
+INFO         | 	 argv[104] = "/tmp/android-sdk/emulator/lib/pc-bios"
+INFO         | 	 argv[105] = "-soundhw"
+INFO         | 	 argv[106] = "virtio-snd-pci"
+INFO         | 	 argv[107] = "-vga"
+INFO         | 	 argv[108] = "none"
+INFO         | 	 argv[109] = "-append"
+INFO         | 	 argv[110] = "8250.nr_uarts=1 clocksource=pit no_timer_check console=0 loop.max_part=7 ramoops.mem_address=0xff018000 ramoops.mem_size=0x10000 memmap=0x10000$0xff018000 printk.devkmsg=on bootconfig"
+INFO         | 	 argv[111] = "-android-hw"
+INFO         | 	 argv[112] = "/home/ubuntu/.android/avd/../avd/nuum_api36.avd/hardware-qemu.ini"
+INFO         | Concatenated QEMU options: /tmp/android-sdk/emulator/qemu/linux-x86_64/qemu-system-x86_64-headless -dns-server 10.0.0.2 -no-audio -serial null -device goldfish_pstore,addr=0xff018000,size=0x10000,file=/home/ubuntu/.android/avd/../avd/nuum_api36.avd/data/misc/pstore/pstore.bin -cpu android64 -enable-kvm -smp cores=2 -m 2560 -lcd-density 420 -object iothread,id=disk-iothread -nodefaults -kernel /tmp/android-sdk/system-images/android-36/google_apis/x86_64//kernel-ranchu -initrd /home/ubuntu/.android/avd/../avd/nuum_api36.avd/initrd -drive if=none,index=0,id=system,if=none,file=/tmp/android-sdk/system-images/android-36/google_apis/x86_64//system.img,read-only -device virtio-blk-pci,drive=system,iothread=disk-iothread,modern-pio-notify -drive if=none,index=1,id=cache,if=none,file=/home/ubuntu/.android/avd/../avd/nuum_api36.avd/cache.img.qcow2,overlap-check=none,cache=unsafe,l2-cache-size=1048576 -device virtio-blk-pci,drive=cache,iothread=disk-iothread,modern-pio-notify -drive if=none,index=2,id=userdata,if=none,file=/home/ubuntu/.android/avd/../avd/nuum_api36.avd/userdata-qemu.img.qcow2,overlap-check=none,cache=unsafe,l2-cache-size=1048576 -device virtio-blk-pci,drive=userdata,iothread=disk-iothread,modern-pio-notify -drive if=none,index=3,id=encrypt,if=none,file=/home/ubuntu/.android/avd/../avd/nuum_api36.avd/encryptionkey.img.qcow2,overlap-check=none,cache=unsafe,l2-cache-size=1048576 -device virtio-blk-pci,drive=encrypt,iothread=disk-iothread,modern-pio-notify -drive if=none,index=4,id=vendor,if=none,file=/tmp/android-sdk/system-images/android-36/google_apis/x86_64//vendor.img,read-only -device virtio-blk-pci,drive=vendor,iothread=disk-iothread,modern-pio-notify -netdev user,id=mynet -device virtio-net-pci,netdev=mynet -chardev null,id=forhvc0 -chardev null,id=forhvc1 -device virtio-serial-pci,ioeventfd=off -device virtconsole,chardev=forhvc0 -device virtconsole,chardev=forhvc1 -chardev netsim,id=uwb -device virtconsole,chardev=uwb,name=uwb -chardev netsim,id=bluetooth -device virtserialport,chardev=bluetooth,name=bluetooth -device virtio-serial,ioeventfd=off -chardev socket,port=38619,host=::1,nowait,nodelay,reconnect=10,ipv6,id=modem -device virtserialport,chardev=modem,name=modem -device virtio-rng-pci -show-cursor -device virtio_input_multi_touch_pci_1 -device virtio_input_multi_touch_pci_2 -device virtio_input_multi_touch_pci_3 -device virtio_input_multi_touch_pci_4 -device virtio_input_multi_touch_pci_5 -device virtio_input_multi_touch_pci_6 -device virtio_input_multi_touch_pci_7 -device virtio_input_multi_touch_pci_8 -device virtio_input_multi_touch_pci_9 -device virtio_input_multi_touch_pci_10 -device virtio_input_multi_touch_pci_11 -netdev user,id=virtio-wifi,dhcpstart=10.0.2.16 -device virtio-wifi-pci,netdev=virtio-wifi -device virtio-vsock-pci,guest-cid=77 -L /tmp/android-sdk/emulator/lib/pc-bios -soundhw virtio-snd-pci -vga none -append '8250.nr_uarts=1 clocksource=pit no_timer_check console=0 loop.max_part=7 ramoops.mem_address=0xff018000 ramoops.mem_size=0x10000 memmap=0x10000$0xff018000 printk.devkmsg=on bootconfig' -android-hw /home/ubuntu/.android/avd/../avd/nuum_api36.avd/hardware-qemu.ini
+DEBUG   | Android qemu version 37.2.13.0 (build_id 16740729) (CL:N/A)
+DEBUG   | Starting QEMU main loop
+DEBUG   | registered 'boot-properties' qemud service
+DEBUG   | Adding boot property: 'ro.opengles.version' = '196608'
+DEBUG   | Adding boot property: 'qemu.sf.fake_camera' = 'back'
+DEBUG   | Adding boot property: 'dalvik.vm.heapsize' = '576m'
+DEBUG   | Adding boot property: 'qemu.hw.mainkeys' = '0'
+DEBUG   | Adding boot property: 'qemu.sf.lcd_density' = '420'
+DEBUG   | control console listening on port 5554, ADB on port 5555
+DEBUG   | goldfish_events.have-dpad: false
+DEBUG   | goldfish_events.have-trackball: false
+DEBUG   | goldfish_events.have-camera: true
+DEBUG   | goldfish_events.have-keyboard: false
+DEBUG   | goldfish_events.have-lidswitch: true
+DEBUG   | goldfish_events.have-tabletmode: false
+DEBUG   | goldfish_events.have-touch: false
+DEBUG   | goldfish_events.have-multitouch: false
+DEBUG   | Adding boot property: 'net.wifi_mac_prefix' = '5554'
+INFO         | Activated packet streamer for uwb emulation
+INFO         | Activated packet streamer for bluetooth emulation

@@ -20,8 +20,24 @@ android {
     buildFeatures {
         compose = true
     }
+    buildTypes {
+        release {
+            // Architecture §11: R8 is what keeps the release APK under 30 MB.
+            // The unminified dex was about 31 MB. Consumer rules from Room,
+            // DataStore, and kotlinx.serialization stay in effect.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
     testOptions {
         unitTests.isIncludeAndroidResources = true
+    }
+    sourceSets.named("test") {
+        kotlin.directories.add("../testing/acceptance/src/host/kotlin")
     }
 }
 

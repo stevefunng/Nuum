@@ -13,6 +13,7 @@ import com.nuum.contracts.RunEndStatus
 import com.nuum.contracts.SendResult
 import com.nuum.contracts.ToolResolution
 import com.nuum.contracts.ToolRoots
+import com.nuum.contracts.TurnContextResult
 import com.nuum.contracts.TurnStartParams
 import com.nuum.contracts.TurnToolDecision
 import com.nuum.contracts.TurnToolResult
@@ -269,26 +270,38 @@ internal suspend fun HostRuntime.resolveTool(id: String, toolCallId: String, res
     val runId = scheduler.activeRunFor(id)
         ?: throw NuumException(HostErrorCode.AGENT_BUSY, "No active run for that agent")
     val decision = TurnToolDecision(runId, toolCallId, resolution)
-    if (allow) kernel.approveTool(decision) else kernel.denyTool(decision)
-    if (resolution == ToolResolution.ALWAYS || resolution == ToolResolution.NEVER) {
+    // Persist before unblocking the kernel. The turn can finish on another
+    // coroutine as soon as approve/deny returns, and finishRun drops leftovers.
+    val pending = pendingApprovals.remove(pendingKey(id, toolCallId))
+    if (pending != null && (resolution == ToolResolution.ALWAYS || resolution == ToolResolution.NEVER)) {
         gate.withLock {
             val path = NuumPaths.toolApprovalsPath(id)
             val file = store.readDoc(path, ApprovalFile.serializer()) ?: ApprovalFile()
-            val pending = liveParts[id]?.parts?.filterIsInstance<AssistantPart.ToolCall>()?.find { it.id == toolCallId }
-            val action = pending?.arguments?.get("action")?.toString()?.let { wire ->
-                com.nuum.protocol.LocalToolAction.entries.find { it.toContract().wire == wire }
-            } ?: return@withLock
-            val target = pending.arguments["path"]?.toString() ?: pending.arguments["target"]?.toString() ?: return@withLock
-            val approval = com.nuum.protocol.ToolApproval(action, target)
             val next = if (resolution == ToolResolution.ALWAYS) {
-                file.copy(always = (file.always + approval).distinct())
+                file.copy(always = (file.always + pending).distinct())
             } else {
-                file.copy(refused = (file.refused + approval).distinct())
+                file.copy(refused = (file.refused + pending).distinct())
             }
             store.writeDoc(path, ApprovalFile.serializer(), next)
         }
     }
+    if (allow) kernel.approveTool(decision) else kernel.denyTool(decision)
 }
+
+private suspend fun HostRuntime.acknowledgeContext(event: KernelEvent.Context) {
+    // The kernel waits here before every model call when a context window is set.
+    // Replying with no replacement keeps the messages it already has. Compaction
+    // still runs before the turn starts; this does not add a second compactor.
+    try {
+        kernel.provideContext(TurnContextResult(event.runId, event.requestId))
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        // The run ended before this reply.
+    }
+}
+
+private fun pendingKey(agentId: String, toolCallId: String): String = "$agentId\u0000$toolCallId"
 
 private fun KernelEvent.ownerRunId(): String = when (this) {
     is KernelEvent.Context -> runId
@@ -304,7 +317,7 @@ private fun KernelEvent.ownerRunId(): String = when (this) {
 internal suspend fun HostRuntime.onKernel(event: KernelEvent) {
     val agentId = scheduler.agentIdFor(event.ownerRunId()) ?: return
     when (event) {
-        is KernelEvent.Context -> Unit
+        is KernelEvent.Context -> acknowledgeContext(event)
         is KernelEvent.Delta -> {
             gate.withLock {
                 val existing = liveParts[agentId]
@@ -316,12 +329,16 @@ internal suspend fun HostRuntime.onKernel(event: KernelEvent) {
             }
             emit(HostEvent.AgentMessageDelta(agentId, event.runId, event.messageId, event.delta, event.part))
         }
-        is KernelEvent.ToolPending -> emit(
-            HostEvent.AgentToolPending(
-                agentId, event.runId, event.toolCallId, event.toolName, event.arguments,
-                event.action, event.target, event.justification, event.allowAlways, event.details
+        is KernelEvent.ToolPending -> {
+            pendingApprovals[pendingKey(agentId, event.toolCallId)] =
+                com.nuum.protocol.ToolApproval(event.action.toProtocol(), event.target)
+            emit(
+                HostEvent.AgentToolPending(
+                    agentId, event.runId, event.toolCallId, event.toolName, event.arguments,
+                    event.action, event.target, event.justification, event.allowAlways, event.details
+                )
             )
-        )
+        }
         is KernelEvent.ToolStarted -> {
             gate.withLock {
                 val live = liveParts.getOrPut(agentId) { LiveBuffer(ids(), mutableListOf()) }
@@ -353,6 +370,7 @@ private suspend fun HostRuntime.finishRun(agentId: String, runId: String, status
     }
     scheduler.settle(runId, outcome)
     wakes.closeRun(runId)
+    pendingApprovals.keys.filter { it.startsWith("$agentId\u0000") }.forEach { pendingApprovals.remove(it) }
     drainWake(agentId)
     gate.withLock {
         liveParts.remove(agentId)
