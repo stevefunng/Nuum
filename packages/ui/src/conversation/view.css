@@ -207,12 +207,6 @@
   50% { opacity: 0.45; }
 }
 
-/* ── 创建页：随机形象预览 + 换一个 + 隐藏款徽标 ── */
-.sand-agent-create__preview { position: relative; display: inline-flex; }
-.sand-agent-create__hidden { position: absolute; left: 50%; bottom: -10px; transform: translateX(-50%); padding: 2px 10px; white-space: nowrap; border-radius: 999px; background: linear-gradient(100deg, #22d3ee, #818cf8, #e879f9, #fb7185); color: #fff; font-size: 10px; font-weight: 650; letter-spacing: 0.04em; box-shadow: 0 2px 8px -2px rgb(0 0 0 / 0.35); }
-.sand-agent-create__shuffle { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; padding: 6px 12px; border: 1px solid var(--nuum-stroke-secondary); border-radius: 999px; background: transparent; color: var(--nuum-text-secondary); font: inherit; font-size: 12px; cursor: pointer; }
-.sand-agent-create__shuffle:hover { color: var(--nuum-text-primary); background: var(--nuum-bg-secondary); }
-
 /* Sidebar-scoped state tokens keep utility behavior isolated from the rest of the app. */
 .sand-agents-sidebar .sand-agent-item__corner-dot {
   position: absolute;
@@ -514,8 +508,8 @@
 .sand-prompt-send {
   grid-column: 3;
   grid-row: 1;
-  color: var(--sand-text-on-primary);
-  background: var(--sand-fill-primary);
+  color: var(--nunu-chat-ink, var(--sand-text-on-primary));
+  background: var(--nunu-chat-accent, var(--sand-fill-primary));
   transition: background-color .16s ease, opacity .16s ease;
 }
 .sand-prompt-attach svg,
@@ -528,6 +522,7 @@
 }
 .sand-prompt-attach:hover:not(:disabled) { background: var(--sand-fill-secondary-hover); }
 .sand-prompt-send:hover:not(:disabled) { background: var(--sand-fill-primary-hover); }
+.sand-chat-stage .sand-prompt-send:hover:not(:disabled) { background: color-mix(in srgb, var(--nunu-chat-accent, var(--sand-fill-primary-hover)) 88%, var(--nuum-text-primary)); }
 .sand-prompt-attach:focus-visible,
 .sand-prompt-send:focus-visible { outline: 1px solid var(--sand-border-accent); outline-offset: 1px; }
 .sand-prompt-attach:disabled,
@@ -722,106 +717,8 @@
 @keyframes sand-peer-backdrop-enter { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .sand-peer-sheet, .sand-peer-sheet__surface { animation: none; } }
 
-/* First-agent and plus-button flow: an Agent has a job and identity before a transcript exists. */
-.sand-agent-create {
-  flex: 1 1 0;
-  min-height: 0;
-  overflow: auto;
-  padding: clamp(34px, 7vh, 72px) max(30px, calc((100% - 690px) / 2)) 42px;
-  animation: sand-agent-create-enter .28s cubic-bezier(.22, 1, .36, 1) both;
-}
-.sand-agent-create__hero {
-  display: grid;
-  grid-template-columns: 92px minmax(0, 1fr);
-  gap: 24px;
-  align-items: center;
-  margin-bottom: 34px;
-}
-.sand-agent-create__hero h1 { margin: 4px 0 7px; color: var(--nuum-text-primary); font-size: 28px; line-height: 1.1; letter-spacing: -.035em; }
-.sand-agent-create__hero p { max-width: 480px; margin: 0; color: var(--nuum-text-secondary); font-size: 13px; line-height: 1.55; }
-.sand-agent-create__eyebrow { color: var(--nuum-text-tertiary); font-size: 11px; }
-.sand-agent-create__editor { display: grid; gap: 17px; }
-.sand-agent-create__editor > label { display: grid; gap: 7px; }
-.sand-agent-create__editor > label > span,
-.sand-agent-create__appearance > span,
-.sand-agent-create__suggestions > span { color: var(--nuum-text-secondary); font-size: 11px; font-weight: 600; }
-.sand-agent-create__editor input,
-.sand-agent-create__editor textarea {
-  width: 100%;
-  padding: 11px 12px;
-  color: var(--nuum-text-primary);
-  background: var(--nuum-bg-elevated);
-  border: 1px solid var(--nuum-stroke-secondary);
-  border-radius: 12px;
-  outline: none;
-  box-shadow: var(--nuum-box-shadow-sm);
-}
-.sand-agent-create__editor textarea { line-height: 1.45; }
-.sand-agent-create__editor input:focus,
-.sand-agent-create__editor textarea:focus { border-color: var(--nuum-stroke-focused); }
-.sand-agent-create__appearance { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; }
-.sand-agent-create__colors,
-.sand-agent-create__shapes { display: flex; align-items: center; gap: 7px; }
-.sand-agent-create__colors button {
-  width: 21px;
-  height: 21px;
-  padding: 0;
-  border: 2px solid var(--nuum-bg-editor);
-  border-radius: 50%;
-  box-shadow: 0 0 0 1px var(--nuum-stroke-tertiary);
-  cursor: pointer;
-}
-.sand-agent-create__colors button[aria-checked="true"] { box-shadow: 0 0 0 2px var(--nuum-text-primary); }
-.sand-agent-create__shapes button {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  padding: 0;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  cursor: pointer;
-}
-.sand-agent-create__shapes button[aria-checked="true"] { background: var(--nuum-bg-elevated); border-color: var(--nuum-stroke-secondary); }
-.sand-agent-create__suggestions { display: grid; gap: 9px; margin-top: 25px; }
-.sand-agent-create__suggestions > div { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.sand-agent-create__suggestions button {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  padding: 10px 11px;
-  color: var(--nuum-text-primary);
-  text-align: left;
-  background: transparent;
-  border: 1px solid var(--nuum-stroke-tertiary);
-  border-radius: 11px;
-  cursor: pointer;
-}
-.sand-agent-create__suggestions button:hover { background: var(--nuum-bg-elevated); border-color: var(--nuum-stroke-secondary); }
-.sand-agent-create__suggestions button strong { font-size: 11px; }
-.sand-agent-create__suggestions button span { color: var(--nuum-text-tertiary); font-size: 10px; line-height: 1.4; }
-.sand-agent-create__actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 26px; }
-.sand-agent-create__actions button { min-height: 34px; padding: 0 15px; border: 0; border-radius: 10px; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; }
-.sand-agent-create__cancel { color: var(--nuum-text-secondary); background: transparent; }
-.sand-agent-create__submit { color: var(--sand-text-on-primary); background: var(--sand-fill-primary); }
-.sand-agent-create__submit:disabled { opacity: .45; cursor: default; }
-.sand-agent-create__error { margin-right: auto; color: var(--sand-text-danger, #c43c3c); font-size: 11px; }
-@keyframes sand-agent-create-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-
 @media (prefers-reduced-motion: reduce) {
-  .sand-agent-avatar__face,
-  .sand-agent-avatar__eyes,
-  .sand-transcript-row,
-  .sand-tool-activity,
-  .sand-agent-create { animation: none !important; }
-}
-
-@media (max-width: 760px) {
-  .sand-agent-create__hero { grid-template-columns: 64px minmax(0, 1fr); gap: 16px; }
-  .sand-agent-create__hero .sand-agent-avatar { width: 64px !important; height: 64px !important; }
-  .sand-agent-create__appearance { grid-template-columns: 1fr; }
-  .sand-agent-create__suggestions > div { grid-template-columns: 1fr; }
+  .sand-agent-avatar__face, .sand-agent-avatar__eyes, .sand-transcript-row, .sand-tool-activity { animation: none !important; }
 }
 
 /* ── 提问卡片（SendMessage type=widget）──────────────────────────────────── */

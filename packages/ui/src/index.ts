@@ -18,6 +18,8 @@ export {
 export { SandButton, SandIcon, SandIconButton } from "./kit/sand-kit-primitives";
 export { Bzn, createRuntimeThemeInstaller, type RuntimeThemeMode } from "./theme/runtime-theme-token-installer";
 
+export { AgentCreation } from "./conversation/agent-creation";
+
 export { AgentProfilePanel } from "./conversation/agent-profile-panel";
 
 export { t, getLanguage, setLanguage, useLanguage } from "./i18n";

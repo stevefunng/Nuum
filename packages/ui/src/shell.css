@@ -74,8 +74,8 @@ textarea, input, .sand-message-prose { user-select: text; }
 }
 .sand-message--user {
   margin-left: auto;
-  color: var(--sand-text-on-color, #fcfcfc);
-  background: var(--sand-fill-bubble-user);
+  color: var(--nunu-chat-ink, var(--sand-text-on-color, #fcfcfc));
+  background: var(--nunu-chat-accent, var(--sand-fill-bubble-user));
 }
 .sand-message--user .sand-message-prose {
   color: inherit;

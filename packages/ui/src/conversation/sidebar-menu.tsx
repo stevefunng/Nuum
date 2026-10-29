@@ -1,10 +1,8 @@
 import { t } from "../i18n";
-import type { AgentView, WorkListItem } from "@nuum/protocol";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { SandIcon } from "../kit/sand-kit-primitives";
 import type { SandIconName } from "../kit/sand-icon-registry";
-import { AgentAvatar, WorkGroupAvatar } from "./agent-avatar";
 
 export interface SidebarMenuItem { label: string; icon?: SandIconName; disabled?: boolean; separator?: boolean; onSelect(): void }
 
@@ -42,17 +40,10 @@ export function SidebarMenu({ point, items, onClose }: {
   </div>, document.body);
 }
 
-// "+"菜单：复刻 Grok Bot 的新建下拉 —— 两个动作行 + 已有 Nunu / NunuBar 罗列。
-export function SidebarNewMenu({ anchor, agents, works, activeId, activeWorkId, onNewAgent, onNewWork, onOpen, onOpenWork, onClose }: {
+export function SidebarNewMenu({ anchor, onNewAgent, onNewWork, onClose }: {
   anchor: { left: number; top: number; width: number };
-  agents: readonly AgentView[];
-  works: readonly (WorkListItem & { memberIds: readonly string[] })[];
-  activeId: string | null;
-  activeWorkId: string | null;
   onNewAgent(): void;
   onNewWork(): void;
-  onOpen(id: string): void;
-  onOpenWork(id: string): void;
   onClose(): void;
 }) {
   const menu = useRef<HTMLDivElement>(null);
@@ -79,17 +70,9 @@ export function SidebarNewMenu({ anchor, agents, works, activeId, activeWorkId, 
     window.addEventListener("resize", onClose);
     return () => { document.removeEventListener("pointerdown", outside, true); window.removeEventListener("blur", onClose); window.removeEventListener("resize", onClose); };
   }, [onClose]);
-  const rows: { key: string; kind: "action" | "agent" | "work"; label: string; icon?: SandIconName; agent?: AgentView; work?: WorkListItem & { memberIds: readonly string[] }; active?: boolean; onSelect(): void }[] = [
-    { key: "new-nunu", kind: "action", label: t("Create new Nunu"), icon: "plus", onSelect: onNewAgent },
-    { key: "new-work", kind: "action", label: t("Create NunuBar"), icon: "people", onSelect: onNewWork },
-    ...agents.map((agent) => ({
-      key: agent.profile.id, kind: "agent" as const, label: agent.profile.name, agent,
-      active: agent.profile.id === activeId, onSelect: () => onOpen(agent.profile.id)
-    })),
-    ...works.map((work) => ({
-      key: work.id, kind: "work" as const, label: work.name, work,
-      active: work.id === activeWorkId, onSelect: () => onOpenWork(work.id)
-    }))
+  const rows: { key: string; label: string; icon: SandIconName; onSelect(): void }[] = [
+    { key: "new-nunu", label: t("Create new Nunu"), icon: "plus", onSelect: onNewAgent },
+    { key: "new-work", label: t("Create NunuBar"), icon: "people", onSelect: onNewWork }
   ];
   return createPortal(<div ref={menu} className="sand-new-menu" role="menu" aria-label={t("New")} style={{ left: position.x, top: position.y, width: position.width }} onContextMenu={(event) => event.preventDefault()}
     onKeyDown={(event) => {
@@ -101,14 +84,8 @@ export function SidebarNewMenu({ anchor, agents, works, activeId, activeWorkId, 
       const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (current + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
       buttons[next]?.focus();
     }}>
-    {rows.map((row) => <button key={row.key} role="menuitem" type="button" className="sand-new-menu__row" data-active={row.active || undefined} onClick={() => { onClose(); row.onSelect(); }}>
-      {row.kind === "action" ? <span className="sand-new-menu__chip"><SandIcon name={row.icon!} size={12} /></span>
-        : row.kind === "agent" && row.agent ? <span className="sand-new-menu__avatar"><AgentAvatar agentId={row.agent.profile.id} color={row.agent.profile.avatarColor} shape={row.agent.profile.avatarShape} material={row.agent.profile.avatarMaterial} size={22} /></span>
-        : <span className="sand-new-menu__avatar">
-            {row.work && row.work.memberIds.length
-              ? <WorkGroupAvatar memberIds={row.work.memberIds} agents={agents} size={22} />
-              : <span className="sand-new-menu__avatar--work">{row.label.slice(0, 1).toUpperCase()}</span>}
-          </span>}
+    {rows.map((row) => <button key={row.key} role="menuitem" type="button" className="sand-new-menu__row" onClick={() => { onClose(); row.onSelect(); }}>
+      <span className="sand-new-menu__chip"><SandIcon name={row.icon} size={12} /></span>
       <span className="sand-new-menu__label">{row.label}</span>
     </button>)}
   </div>, document.body);

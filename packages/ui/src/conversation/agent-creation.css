@@ -1,0 +1,47 @@
+.sand-agent-create {
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 0;
+  overflow: auto;
+  color: var(--nuum-text-primary);
+  background: var(--nuum-bg-elevated);
+  border: 1px solid var(--nuum-stroke-secondary);
+  border-radius: 16px;
+  box-shadow: 0 24px 80px -24px var(--nuum-shadow-primary);
+  animation: sand-agent-create-enter 260ms cubic-bezier(.22, 1, .36, 1) both;
+}
+.sand-agent-create::backdrop { background: rgb(0 0 0 / .42); }
+.sand-agent-create form { display: flex; flex-direction: column; }
+.sand-agent-create__header { display: flex; align-items: center; justify-content: space-between; min-height: 54px; padding: 8px 16px; border-bottom: 1px solid var(--nuum-stroke-tertiary); }
+.sand-agent-create__header h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.sand-agent-create__close { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; color: var(--nuum-icon-secondary); background: transparent; border: 0; border-radius: 50%; cursor: pointer; }
+.sand-agent-create__close:hover { background: var(--nuum-bg-secondary); }
+.sand-agent-create__body { padding: 8px 24px 28px; }
+.sand-agent-create__name { box-sizing: border-box; width: 100%; height: 36px; padding: 0 12px; color: var(--nuum-text-primary); background: transparent; border: 1px solid var(--nuum-stroke-secondary); border-radius: 9px; font: inherit; font-size: 14px; text-align: center; }
+.sand-agent-create__name::placeholder { color: var(--nuum-text-tertiary); }
+.sand-agent-create__name:focus { outline: 1px solid var(--nuum-stroke-focused); outline-offset: 1px; }
+.sand-agent-create__palette { min-width: 0; margin: 24px 0 0; padding: 0; border: 0; }
+.sand-agent-create__palette > div { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 14px; }
+.sand-agent-create__palette button { flex: 0 0 28px; width: 28px; height: 28px; padding: 0; background: var(--swatch); border: 3px solid var(--nuum-bg-elevated); border-radius: 50%; box-shadow: 0 0 0 1px var(--nuum-stroke-tertiary); cursor: pointer; transition: box-shadow 140ms ease, transform 140ms ease; }
+.sand-agent-create__palette button:hover { transform: scale(1.1); }
+.sand-agent-create__palette button[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--nuum-text-secondary); }
+.sand-agent-create button:focus-visible { outline: 2px solid var(--nuum-stroke-focused); outline-offset: 3px; }
+.sand-agent-create__actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px; border-top: 1px solid var(--nuum-stroke-tertiary); }
+.sand-agent-create__actions button { min-height: 32px; padding: 0 16px; border: 1px solid var(--nuum-stroke-secondary); border-radius: 999px; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; }
+.sand-agent-create__cancel { color: var(--nuum-text-primary); background: var(--nuum-bg-secondary); }
+.sand-agent-create__submit { color: var(--sand-text-on-primary); background: var(--sand-fill-primary); }
+.sand-agent-create__submit:hover:not(:disabled) { background: var(--sand-fill-primary-hover); }
+.sand-agent-create button:disabled { opacity: .45; cursor: default; }
+.sand-agent-create__error { margin: 16px 0 0; color: var(--sand-text-danger); font-size: 12px; overflow-wrap: anywhere; }
+
+/* One projection surface keeps the shell, ribbon and portrait in the same space. */
+.sand-nunu-unbox { position: relative; display: grid; place-items: center; height: 280px; isolation: isolate; }
+.sand-nunu-unbox__scene { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.sand-nunu-unbox__source { position: absolute; width: 192px; height: 192px; opacity: 0; pointer-events: none; }
+@keyframes sand-agent-create-enter { from { opacity: 0; transform: translateY(-6px) scale(.98); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .sand-agent-create { animation: none; }
+  .sand-agent-create__palette button { transition: none; }
+}
+@media (max-height: 540px) { .sand-nunu-unbox { height: 192px; } }

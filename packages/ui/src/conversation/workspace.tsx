@@ -4,14 +4,12 @@ import { supportsImageInput, type AttachmentUpload, type ModelRef } from "@nuum/
 import { ExecutionApproval } from "./execution-approval";
 import { t } from "../i18n";
 import type { AgentView, ViewBlock } from "@nuum/protocol";
-import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode, type CSSProperties } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { SandIcon, SandIconButton } from "../kit/sand-kit-primitives";
-import { AutoTextarea } from "../kit/auto-textarea";
-import { AGENT_AVATAR_MATERIAL_HIDDEN, AgentAvatar, rollAgentAvatar } from "./agent-avatar";
+import { AgentAvatar, resolveAgentAvatarColor } from "./agent-avatar";
 import { nunuActivityState } from "./nunu-state";
-import { AGENT_ROLE_TEMPLATES } from "./agent-templates";
 
 export interface PendingTool {
   toolCallId: string;
@@ -28,9 +26,6 @@ export interface ConversationWorkspaceProps {
   blocks: readonly ViewBlock[];
   blockTimestamps?: Readonly<Record<string, number>>;
   autoFocusInput?: boolean;
-  creatingAgent?: boolean;
-  canCancelCreate?: boolean;
-  creationError?: string | null;
   pendingTool?: PendingTool | null;
   attachments?: readonly AttachmentUpload[];
   sending?: boolean;
@@ -41,14 +36,6 @@ export interface ConversationWorkspaceProps {
   onDraftChange(value: string): void;
   onSubmit(): void;
   onCancel(): void;
-  onCancelCreate(): void;
-  onCreateAgent(profile: {
-    name: string;
-    description: string;
-    avatarColor: string;
-    avatarShape: string;
-    avatarMaterial: string;
-  }): void;
   onApprove(resolution: "always" | "once" | "deny" | "never"): void | Promise<void>;
   /** 回答提问卡片：选项值原样成为一条用户消息并唤醒对方。 */
   onAnswerWidget?(messageId: string, value: string): void;
@@ -351,106 +338,12 @@ function PeerConversation({ agent, peer, blocks, timestamps, onClose }: {
   );
 }
 
-function AgentCreation({
-  canCancel,
-  error,
-  onCancel,
-  onCreate
-}: {
-  canCancel: boolean;
-  error?: string | null;
-  onCancel(): void;
-  onCreate(profile: { name: string; description: string; avatarColor: string; avatarShape: string; avatarMaterial: string }): void;
-}) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  // 形象在创建时随机定下（换一个可重摇），提交后写进 profile 永久绑定。
-  const [avatar, setAvatar] = useState(rollAgentAvatar);
-  const submit = () => {
-    if (!name.trim()) return;
-    onCreate({
-      name: name.trim(),
-      description: description.trim(),
-      avatarColor: avatar.color,
-      avatarShape: avatar.shape,
-      avatarMaterial: avatar.material
-    });
-  };
-  return (
-    <div className="sand-agent-create">
-      <div className="sand-agent-create__hero">
-        <div className="sand-agent-create__preview">
-          <AgentAvatar
-            agentId={name || "new-agent"}
-            color={avatar.color}
-            shape={avatar.shape}
-            material={avatar.material}
-            size={112}
-            fullBody
-            state="happy"
-          />
-          {avatar.material === AGENT_AVATAR_MATERIAL_HIDDEN ? <span className="sand-agent-create__hidden">{t("Hidden edition")}</span> : null}
-        </div>
-        <div>
-          <span className="sand-agent-create__eyebrow">{t("A teammate with its own context")}</span>
-          <h1>{t("Create an Agent")}</h1>
-          <p>{t("Give it an ongoing job. It gets its own conversation, memory, and workspace.")}</p>
-          <button className="sand-agent-create__shuffle" onClick={() => setAvatar(rollAgentAvatar())} type="button">
-            <SandIcon name="shuffle" size={14} />
-            {t("Shuffle")}
-          </button>
-        </div>
-      </div>
-      <div className="sand-agent-create__editor">
-        <label>
-          <span>{t("Name")}</span>
-          <input autoFocus onChange={(event) => setName(event.target.value)} placeholder={t("e.g. Release scout")} value={name} />
-        </label>
-        <label>
-          <span>{t("What should this Agent do?")}</span>
-          <AutoTextarea
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder={t("A standing role helps other Agents know when to message it.")}
-            value={description}
-          />
-        </label>
-      </div>
-      <div className="sand-agent-create__suggestions">
-        <span>{t("Or start with a role")}</span>
-        <div>
-          {AGENT_ROLE_TEMPLATES.map((template) => (
-            <button
-              key={t(template.name)}
-              onClick={() => {
-                setName(t(template.name));
-                setDescription(t(template.description));
-              }}
-              type="button"
-            >
-              <strong>{t(template.name)}</strong>
-              <span>{t(template.description)}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="sand-agent-create__actions">
-        {error ? <span className="sand-agent-create__error">{t(error)}</span> : null}
-        {canCancel ? <button className="sand-agent-create__cancel" onClick={onCancel} type="button">{t("Cancel")}</button> : null}
-        <button className="sand-agent-create__submit" disabled={!name.trim()} onClick={submit} type="button">{t("Create Agent")}</button>
-      </div>
-    </div>
-  );
-}
-
 export function ConversationWorkspace({
   agent,
   agents = [],
   blocks: rawBlocks,
   blockTimestamps = {},
   autoFocusInput = false,
-  creatingAgent = false,
-  canCancelCreate = false,
-  creationError,
   pendingTool,
   draft,
   attachments = [],
@@ -461,8 +354,6 @@ export function ConversationWorkspace({
   onDraftChange,
   onSubmit,
   onCancel,
-  onCancelCreate,
-  onCreateAgent,
   onApprove,
   onAnswerWidget,
   onOpenProfile,
@@ -529,21 +420,20 @@ export function ConversationWorkspace({
     if (!field) return;
     field.style.height = "auto";
     field.style.height = `${Math.min(96, field.scrollHeight)}px`;
-  }, [draft, creatingAgent]);
+  }, [draft]);
 
   useEffect(() => {
-    if (creatingAgent) return;
     const transcript = transcriptRef.current;
     if (!transcript) return;
     transcript.scrollTo({ top: transcript.scrollHeight, behavior: "smooth" });
-  }, [blocks.length, creatingAgent]);
+  }, [blocks.length]);
 
   useEffect(() => {
     if (autoFocusInput) promptRef.current?.focus();
   }, [agent?.profile.id, autoFocusInput]);
 
   return (
-    <section className="sand-chat-stage">
+    <section className="sand-chat-stage" style={agent ? { "--nunu-chat-accent": resolveAgentAvatarColor(agent.profile.id, agent.profile.avatarColor).chat, "--nunu-chat-ink": "#fff" } as CSSProperties : undefined}>
       <header className="sand-chat-header">
         {agent ? (
           <button className="sand-chat-header__identity" disabled={!onOpenProfile} onClick={onOpenProfile} type="button" aria-label={t("Open {name} profile", { name: agent.profile.name })}>
@@ -564,9 +454,6 @@ export function ConversationWorkspace({
           <div className="sand-chat-header__identity sand-chat-header__identity--blank" />
         )}
       </header>
-      {creatingAgent ? (
-        <AgentCreation canCancel={canCancelCreate} error={creationError} onCancel={onCancelCreate} onCreate={onCreateAgent} />
-      ) : <>
       <div aria-label={t("Conversation transcript")} className="sand-virtual-transcript" ref={transcriptRef} role="log">
         {empty ? (
           <div className="sand-empty sand-empty--welcome">
@@ -689,7 +576,6 @@ export function ConversationWorkspace({
       {agent && peerSheetAgentId && peerBlocks.length ? (
         <PeerConversation agent={agent} peer={peerAgent} blocks={peerBlocks} timestamps={blockTimestamps} onClose={() => setPeerSheetAgentId(null)} />
       ) : null}
-      </>}
     </section>
   );
 }

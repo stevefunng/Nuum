@@ -26,6 +26,7 @@ import {
 } from "@nuum/protocol";
 import {
   AgentProfilePanel,
+  AgentCreation,
   ConversationSidebar,
   ConversationWorkspace,
   SettingsOverlay,
@@ -342,10 +343,8 @@ export function App() {
   }
 
   function newAgent(): void {
-    setActiveId(null);
-    selectWork(null);
-    setWorkSnapshot(null);
     setCreatingWork(false);
+    setProfileEditorId(null);
     setCreationError(null);
     setCreatingAgent(true);
   }
@@ -385,8 +384,8 @@ export function App() {
   }
 
   function cancelCreate(): void {
-    const fallback = agents[0];
-    if (fallback) void openAgent(fallback.profile.id);
+    setCreatingAgent(false);
+    setCreationError(null);
   }
 
   async function send(): Promise<void> {
@@ -529,7 +528,11 @@ export function App() {
         {creatingWork ? (
           <WorkCreation
             canCancel={agents.length > 0 || works.length > 0}
-            onCancel={() => works[0] ? void openWork(works[0].id) : cancelCreate()}
+            onCancel={() => {
+              setCreatingWork(false);
+              if (works[0]) void openWork(works[0].id);
+              else if (agents[0]) void openAgent(agents[0].profile.id);
+            }}
             onCreate={(input) => void createWork(input)}
           />
         ) : activeWorkId && workSnapshot ? (
@@ -608,9 +611,6 @@ export function App() {
             agents={agents}
             blocks={blocks}
             blockTimestamps={blockTimestamps}
-            creatingAgent={creatingAgent}
-            canCancelCreate={agents.length > 0}
-            creationError={creationError}
             pendingTool={pane.pendingTool?.workId ? null : pane.pendingTool}
             draft={draft}
             attachments={pane.attachments}
@@ -624,8 +624,6 @@ export function App() {
             }}
             onSubmit={() => void send()}
             onCancel={() => activeId && void window.nuum.host.request(HostMethods.agentCancel, { id: activeId })}
-            onCancelCreate={cancelCreate}
-            onCreateAgent={(profile) => void createAgent(profile)}
             onApprove={(resolution) => approve(resolution)}
             onAnswerWidget={answerWidget}
             onOpenProfile={() => active && setProfileEditorId((current) => current === active.profile.id ? null : active.profile.id)}
@@ -634,6 +632,7 @@ export function App() {
         {workNotice ? <div className="sand-work-notice" role="alert">{t(workNotice)}</div> : null}
 
       </div>
+      {creatingAgent ? <AgentCreation error={creationError} onCancel={cancelCreate} onCreate={createAgent} /> : null}
       {active && profileEditorId === active.profile.id && !creatingAgent && !activeWorkId && !creatingWork ? (
         <AgentProfilePanel key={active.profile.id} profile={active.profile} settings={active.settings}
           workspaceNames={Object.fromEntries(works.filter(work => work.workspaceId).map(work => [work.workspaceId!, work.name]))}

@@ -1,12 +1,12 @@
 // Persisted IDs remain compatible with existing profiles; the palette now uses soft pigments.
 export const AGENT_AVATAR_COLORS = [
-  { id: "cream", value: "#f3e8d4", dark: "#c8af8b" },
-  { id: "green", value: "#bac8a8", dark: "#7e9270" },
-  { id: "orange", value: "#f4c2a1", dark: "#ce8e6a" },
-  { id: "violet", value: "#d5c6eb", dark: "#a28dbd" },
-  { id: "blue", value: "#bedce7", dark: "#7cabbf" },
-  { id: "magenta", value: "#eec3cc", dark: "#bd899b" },
-  { id: "honey", value: "#efdb9b", dark: "#c1a456" }
+  { id: "cream", chat: "#806444", value: "#f3e8d4", dark: "#c8af8b" },
+  { id: "green", chat: "#526c43", value: "#bac8a8", dark: "#7e9270" },
+  { id: "orange", chat: "#ad5c30", value: "#f4c2a1", dark: "#ce8e6a" },
+  { id: "violet", chat: "#79569d", value: "#d5c6eb", dark: "#a28dbd" },
+  { id: "blue", chat: "#39738c", value: "#bedce7", dark: "#7cabbf" },
+  { id: "magenta", chat: "#a4526c", value: "#eec3cc", dark: "#bd899b" },
+  { id: "honey", chat: "#8c6b22", value: "#efdb9b", dark: "#c1a456" }
 ] as const;
 export const AGENT_AVATAR_SHAPES = ["circle", "blob", "droplet", "cloud", "tablet"] as const;
 export type AgentAvatarShape = (typeof AGENT_AVATAR_SHAPES)[number];
@@ -25,7 +25,7 @@ export const SHAPES: Record<AgentAvatarShape, string> = {
 };
 function hash(value: string) { let result = 2166136261; for (let i = 0; i < value.length; i++) result = Math.imul(result ^ value.charCodeAt(i), 16777619); return result >>> 0; }
 export function resolveAgentAvatarColor(agentId: string, requested?: string | null) {
-  if (requested === "black") return { id: "black", value: "#a7aaa8", dark: "#707873" };
+  if (requested === "black") return { id: "black", chat: "#3b4140", value: "#a7aaa8", dark: "#707873" };
   return AGENT_AVATAR_COLORS.find(color => color.id === requested) ?? AGENT_AVATAR_COLORS[hash(agentId) % AGENT_AVATAR_COLORS.length]!;
 }
 export function resolveAgentAvatarShape(agentId: string, requested?: string | null): AgentAvatarShape {

@@ -342,14 +342,8 @@ export function ConversationSidebar({
       {menu && items.length ? <SidebarMenu point={menu.point} items={items} onClose={closeMenu} /> : null}
       {newMenu ? <SidebarNewMenu
         anchor={newMenu}
-        agents={agents.filter((agent) => !agent.settings.hiddenFromSidebar)}
-        works={visibleWorks.map((work) => ({ ...work, memberIds: workMemberIds(work.id) }))}
-        activeId={activeId}
-        activeWorkId={activeWorkId}
         onNewAgent={onNewAgent}
         onNewWork={onNewWork}
-        onOpen={onOpen}
-        onOpenWork={onOpenWork}
         onClose={() => setNewMenu(null)}
       /> : null}
       {groupDialog ? <SidebarNameDialog key={groupDialog.sectionId ?? "new"} title={groupDialog.sectionId ? t("Rename group") : t("New group")}
