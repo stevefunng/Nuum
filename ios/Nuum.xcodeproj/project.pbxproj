@@ -1,0 +1,474 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000060 /* NuumContracts in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000040 /* NuumContracts */; };
+		A10000000000000000000061 /* NuumProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000041 /* NuumProtocol */; };
+		A10000000000000000000062 /* NuumSecurity in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000042 /* NuumSecurity */; };
+		A10000000000000000000063 /* NuumStorage in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000043 /* NuumStorage */; };
+		A10000000000000000000064 /* NuumModel in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000044 /* NuumModel */; };
+		A10000000000000000000065 /* NuumKernel in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000045 /* NuumKernel */; };
+		A10000000000000000000066 /* NuumAgent in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000046 /* NuumAgent */; };
+		A10000000000000000000067 /* NuumTools in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000047 /* NuumTools */; };
+		A10000000000000000000068 /* NuumFeatureShell in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000048 /* NuumFeatureShell */; };
+		A10000000000000000000069 /* NuumFeatureConversation in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000049 /* NuumFeatureConversation */; };
+		A1000000000000000000006A /* NuumFeatureWork in Frameworks */ = {isa = PBXBuildFile; productRef = A1000000000000000000004A /* NuumFeatureWork */; };
+		A1000000000000000000006B /* NuumFeatureSettings in Frameworks */ = {isa = PBXBuildFile; productRef = A1000000000000000000004B /* NuumFeatureSettings */; };
+/* End PBXBuildFile section */
+
+
+/* Begin PBXFileReference section */
+		A10000000000000000000007 /* Nuum.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Nuum.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A10000000000000000000004 /* Exceptions for "App" folder in "Nuum" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				Nuum.entitlements,
+			);
+			target = A10000000000000000000002 /* Nuum */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		A10000000000000000000003 /* App */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A10000000000000000000004 /* Exceptions for "App" folder in "Nuum" target */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+
+/* Begin PBXFrameworksBuildPhase section */
+		A10000000000000000000009 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000060 /* NuumContracts in Frameworks */,
+				A10000000000000000000061 /* NuumProtocol in Frameworks */,
+				A10000000000000000000062 /* NuumSecurity in Frameworks */,
+				A10000000000000000000063 /* NuumStorage in Frameworks */,
+				A10000000000000000000064 /* NuumModel in Frameworks */,
+				A10000000000000000000065 /* NuumKernel in Frameworks */,
+				A10000000000000000000066 /* NuumAgent in Frameworks */,
+				A10000000000000000000067 /* NuumTools in Frameworks */,
+				A10000000000000000000068 /* NuumFeatureShell in Frameworks */,
+				A10000000000000000000069 /* NuumFeatureConversation in Frameworks */,
+				A1000000000000000000006A /* NuumFeatureWork in Frameworks */,
+				A1000000000000000000006B /* NuumFeatureSettings in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+
+/* Begin PBXGroup section */
+		A10000000000000000000005 = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000003 /* App */,
+				A10000000000000000000006 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A10000000000000000000006 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000007 /* Nuum.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+
+/* Begin PBXNativeTarget section */
+		A10000000000000000000002 /* Nuum */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1000000000000000000000B /* Build configuration list for PBXNativeTarget "Nuum" */;
+			buildPhases = (
+				A10000000000000000000008 /* Sources */,
+				A10000000000000000000009 /* Frameworks */,
+				A1000000000000000000000A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000003 /* App */,
+			);
+			name = Nuum;
+			packageProductDependencies = (
+				A10000000000000000000040 /* NuumContracts */,
+				A10000000000000000000041 /* NuumProtocol */,
+				A10000000000000000000042 /* NuumSecurity */,
+				A10000000000000000000043 /* NuumStorage */,
+				A10000000000000000000044 /* NuumModel */,
+				A10000000000000000000045 /* NuumKernel */,
+				A10000000000000000000046 /* NuumAgent */,
+				A10000000000000000000047 /* NuumTools */,
+				A10000000000000000000048 /* NuumFeatureShell */,
+				A10000000000000000000049 /* NuumFeatureConversation */,
+				A1000000000000000000004A /* NuumFeatureWork */,
+				A1000000000000000000004B /* NuumFeatureSettings */,
+			);
+			productName = Nuum;
+			productReference = A10000000000000000000007 /* Nuum.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+
+/* Begin PBXProject section */
+		A10000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2720;
+				LastUpgradeCheck = 2720;
+				TargetAttributes = {
+					A10000000000000000000002 = {
+						CreatedOnToolsVersion = 27.2;
+					};
+				};
+			};
+			buildConfigurationList = A1000000000000000000000C /* Build configuration list for PBXProject "Nuum" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				"zh-Hans",
+				Base,
+			);
+			mainGroup = A10000000000000000000005;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A10000000000000000000020 /* XCLocalSwiftPackageReference "NuumContracts" */,
+				A10000000000000000000021 /* XCLocalSwiftPackageReference "NuumProtocol" */,
+				A10000000000000000000022 /* XCLocalSwiftPackageReference "NuumSecurity" */,
+				A10000000000000000000023 /* XCLocalSwiftPackageReference "NuumStorage" */,
+				A10000000000000000000024 /* XCLocalSwiftPackageReference "NuumModel" */,
+				A10000000000000000000025 /* XCLocalSwiftPackageReference "NuumKernel" */,
+				A10000000000000000000026 /* XCLocalSwiftPackageReference "NuumAgent" */,
+				A10000000000000000000027 /* XCLocalSwiftPackageReference "NuumTools" */,
+				A10000000000000000000028 /* XCLocalSwiftPackageReference "NuumFeatureShell" */,
+				A10000000000000000000029 /* XCLocalSwiftPackageReference "NuumFeatureConversation" */,
+				A1000000000000000000002A /* XCLocalSwiftPackageReference "NuumFeatureWork" */,
+				A1000000000000000000002B /* XCLocalSwiftPackageReference "NuumFeatureSettings" */,
+				A1000000000000000000002C /* XCLocalSwiftPackageReference "NuumAcceptance" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = A10000000000000000000006 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A10000000000000000000002 /* Nuum */,
+			);
+		};
+/* End PBXProject section */
+
+
+/* Begin PBXResourcesBuildPhase section */
+		A1000000000000000000000A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+
+/* Begin PBXSourcesBuildPhase section */
+		A10000000000000000000008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+
+/* Begin XCBuildConfiguration section */
+		A1000000000000000000000D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A1000000000000000000000E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		A1000000000000000000000F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = App/Nuum.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.nuum;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A10000000000000000000010 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = App/Nuum.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.nuum;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+
+/* Begin XCConfigurationList section */
+		A1000000000000000000000C /* Build configuration list for PBXProject "Nuum" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000000D /* Debug */,
+				A1000000000000000000000E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1000000000000000000000B /* Build configuration list for PBXNativeTarget "Nuum" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000000F /* Debug */,
+				A10000000000000000000010 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+
+/* Begin XCLocalSwiftPackageReference section */
+		A10000000000000000000020 /* XCLocalSwiftPackageReference "NuumContracts" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NuumContracts;
+		};
+		A10000000000000000000021 /* XCLocalSwiftPackageReference "NuumProtocol" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NuumProtocol;
+		};
+		A10000000000000000000022 /* XCLocalSwiftPackageReference "NuumSecurity" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NuumSecurity;
+		};
+		A10000000000000000000023 /* XCLocalSwiftPackageReference "NuumStorage" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NuumStorage;
+		};
+		A10000000000000000000024 /* XCLocalSwiftPackageReference "NuumModel" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NuumModel;
+		};
+		A10000000000000000000025 /* XCLocalSwiftPackageReference "NuumKernel" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NuumKernel;
+		};
+		A10000000000000000000026 /* XCLocalSwiftPackageReference "NuumAgent" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NuumAgent;
+		};
+		A10000000000000000000027 /* XCLocalSwiftPackageReference "NuumTools" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NuumTools;
+		};
+		A10000000000000000000028 /* XCLocalSwiftPackageReference "NuumFeatureShell" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NuumFeatureShell;
+		};
+		A10000000000000000000029 /* XCLocalSwiftPackageReference "NuumFeatureConversation" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NuumFeatureConversation;
+		};
+		A1000000000000000000002A /* XCLocalSwiftPackageReference "NuumFeatureWork" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NuumFeatureWork;
+		};
+		A1000000000000000000002B /* XCLocalSwiftPackageReference "NuumFeatureSettings" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NuumFeatureSettings;
+		};
+		A1000000000000000000002C /* XCLocalSwiftPackageReference "NuumAcceptance" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NuumAcceptance;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+
+/* Begin XCSwiftPackageProductDependency section */
+		A10000000000000000000040 /* NuumContracts */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000020 /* XCLocalSwiftPackageReference "NuumContracts" */;
+			productName = NuumContracts;
+		};
+		A10000000000000000000041 /* NuumProtocol */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000021 /* XCLocalSwiftPackageReference "NuumProtocol" */;
+			productName = NuumProtocol;
+		};
+		A10000000000000000000042 /* NuumSecurity */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000022 /* XCLocalSwiftPackageReference "NuumSecurity" */;
+			productName = NuumSecurity;
+		};
+		A10000000000000000000043 /* NuumStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000023 /* XCLocalSwiftPackageReference "NuumStorage" */;
+			productName = NuumStorage;
+		};
+		A10000000000000000000044 /* NuumModel */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000024 /* XCLocalSwiftPackageReference "NuumModel" */;
+			productName = NuumModel;
+		};
+		A10000000000000000000045 /* NuumKernel */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000025 /* XCLocalSwiftPackageReference "NuumKernel" */;
+			productName = NuumKernel;
+		};
+		A10000000000000000000046 /* NuumAgent */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000026 /* XCLocalSwiftPackageReference "NuumAgent" */;
+			productName = NuumAgent;
+		};
+		A10000000000000000000047 /* NuumTools */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000027 /* XCLocalSwiftPackageReference "NuumTools" */;
+			productName = NuumTools;
+		};
+		A10000000000000000000048 /* NuumFeatureShell */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000028 /* XCLocalSwiftPackageReference "NuumFeatureShell" */;
+			productName = NuumFeatureShell;
+		};
+		A10000000000000000000049 /* NuumFeatureConversation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000029 /* XCLocalSwiftPackageReference "NuumFeatureConversation" */;
+			productName = NuumFeatureConversation;
+		};
+		A1000000000000000000004A /* NuumFeatureWork */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1000000000000000000002A /* XCLocalSwiftPackageReference "NuumFeatureWork" */;
+			productName = NuumFeatureWork;
+		};
+		A1000000000000000000004B /* NuumFeatureSettings */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1000000000000000000002B /* XCLocalSwiftPackageReference "NuumFeatureSettings" */;
+			productName = NuumFeatureSettings;
+		};
+/* End XCSwiftPackageProductDependency section */
+
+
+	};
+	rootObject = A10000000000000000000001 /* Project object */;
+}
