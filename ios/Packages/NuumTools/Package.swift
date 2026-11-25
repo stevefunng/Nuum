@@ -24,5 +24,12 @@ let package = Package(
                 .swiftLanguageMode(.v6),
             ]
         ),
+        .testTarget(
+            name: "NuumToolsTests",
+            dependencies: ["NuumTools"],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
     ]
 )

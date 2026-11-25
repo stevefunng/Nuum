@@ -1,7 +1,7 @@
 import NuumContracts
 import NuumProtocol
 
-/// Placeholder product. WP-06 replaces this file with `LocalToolBackend`.
+/// Scaffold marker. Product tools live beside this type.
 public enum NuumToolsModule {
     public static let name = "NuumTools"
     public static let notImplemented = UnimplementedToolMessage.iosClient
