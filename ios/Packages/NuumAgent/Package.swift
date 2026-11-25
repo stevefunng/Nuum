@@ -24,5 +24,16 @@ let package = Package(
                 .swiftLanguageMode(.v6),
             ]
         ),
+        .testTarget(
+            name: "NuumAgentTests",
+            dependencies: [
+                "NuumAgent",
+                "NuumContracts",
+                "NuumProtocol",
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
     ]
 )
