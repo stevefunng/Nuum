@@ -24,5 +24,15 @@ let package = Package(
                 .swiftLanguageMode(.v6),
             ]
         ),
+        .testTarget(
+            name: "NuumFeatureSettingsTests",
+            dependencies: [
+                "NuumFeatureSettings",
+                "NuumContracts",
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
     ]
 )
