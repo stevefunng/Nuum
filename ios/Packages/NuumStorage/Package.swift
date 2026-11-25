@@ -24,5 +24,15 @@ let package = Package(
                 .swiftLanguageMode(.v6),
             ]
         ),
+        .testTarget(
+            name: "NuumStorageTests",
+            dependencies: [
+                "NuumStorage",
+                "NuumContracts",
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
     ]
 )
